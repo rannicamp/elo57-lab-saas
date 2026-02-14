@@ -1,109 +1,77 @@
-// app/layout.js
+"use client";
 
-import { Inter } from 'next/font/google';
-import './globals.css';
-import { Toaster } from 'sonner';
-import Script from 'next/script';
-import { Providers } from './providers';
-// CORREÇÃO CRÍTICA AQUI: Adicionado '/shared' ao caminho
-import ServiceWorkerRegistrar from '@/components/shared/ServiceWorkerRegistrar';
-import QueryProvider from './QueryProvider';
+import { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { useAuth } from './AuthContext'; // Importamos o Auth existente
+import { createClient } from '../utils/supabase/client'; // Ajuste o caminho se necessário (ex: '@/utils/...')
 
-// 1. CORREÇÃO DE PDF (A Vacina 💉):
-// Ajustei para @ para garantir que ache o arquivo independente de onde estiver
-import '@/components/financeiro/pdfPolyfill';
+const OrganizationContext = createContext();
 
-const inter = Inter({ subsets: ['latin'] });
+export function OrganizationProvider({ children }) {
+    const { user, loading: authLoading } = useAuth(); 
+    const supabase = createClient();
 
-// 2. CONFIGURAÇÃO DE VIEWPORT (Next.js 15 Standard)
-export const viewport = {
-  themeColor: '#0288d1',
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 1,
-};
+    const [currentOrg, setCurrentOrg] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [isSystemAdmin, setIsSystemAdmin] = useState(false);
 
-// 3. SEO NÍVEL NASA 🚀
-export const metadata = {
-  metadataBase: new URL('https://www.studio57.com.br'),
-  title: {
-    default: 'Studio 57 - Sistema de Gestão Integrada',
-    template: '%s | Studio 57',
-  },
-  description: 'Conectando você aos melhores investimentos imobiliários e residenciais.',
-  manifest: '/manifest.json',
-  icons: {
-    icon: '/favicon.ico',
-    apple: '/icons/icon-192x192.png',
-  },
-  openGraph: {
-    type: 'website',
-    locale: 'pt_BR',
-    url: 'https://www.studio57.com.br',
-    siteName: 'Studio 57',
-    images: [
-      {
-        url: '/og-image-padrao.jpg',
-        width: 1200,
-        height: 630,
-        alt: 'Studio 57 - Gestão e Negócios',
-      },
-    ],
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
-};
+    useEffect(() => {
+        const loadOrganizationData = async () => {
+            if (authLoading) return;
 
-export default function RootLayout({ children }) {
-  return (
-    <html lang="pt-br">
-      <body className={inter.className}>
-        {/* Registro do PWA e Notificações */}
-        <ServiceWorkerRegistrar />
+            if (!user || !user.organizacao_id) {
+                setCurrentOrg(null);
+                setIsSystemAdmin(false);
+                setLoading(false);
+                return;
+            }
 
-        {/* Integração Facebook SDK */}
-        <div id="fb-root"></div>
-        <Script
-          async
-          defer
-          crossOrigin="anonymous"
-          src="https://connect.facebook.net/pt_BR/sdk.js"
-          strategy="afterInteractive"
-        />
-        <Script id="facebook-sdk-init" strategy="afterInteractive">
-          {`
-            window.fbAsyncInit = function() {
-              FB.init({
-                appId      : '1518358099511142',
-                cookie     : true,
-                xfbml      : true,  // <--- CORRIGIDO: Era xfml, agora é xfbml
-                version    : 'v20.0'
-              });
-              FB.AppEvents.logPageView();   
-            };
-          `}
-        </Script>
+            // 1. Busca os detalhes da organização atual
+            const { data: orgData, error } = await supabase
+                .from('organizacoes')
+                .select('*')
+                .eq('id', user.organizacao_id)
+                .single();
 
-        {/* Utilitário de Áudio */}
-        <Script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js" strategy="beforeInteractive" />
+            if (error) {
+                console.error("Erro ao carregar organização:", error);
+                setCurrentOrg({ id: user.organizacao_id, nome: 'Minha Organização' });
+            } else {
+                setCurrentOrg(orgData);
+            }
 
-        <Providers>
-          <QueryProvider>
+            // 2. Define se é a "Matriz" (Sistema Global)
+            setIsSystemAdmin(user.organizacao_id === 1);
+
+            setLoading(false);
+        };
+
+        loadOrganizationData();
+    }, [user, authLoading, supabase]);
+
+    const getScopeQuery = (queryBuilder) => {
+        if (!currentOrg) return queryBuilder;
+        return queryBuilder.or(`organizacao_id.eq.${currentOrg.id},organizacao_id.eq.1`);
+    };
+
+    const value = useMemo(() => ({
+        org: currentOrg,
+        orgId: currentOrg?.id,
+        isSystemAdmin,
+        loading,
+        getScopeQuery
+    }), [currentOrg, isSystemAdmin, loading]);
+
+    return (
+        <OrganizationContext.Provider value={value}>
             {children}
-          </QueryProvider>
-        </Providers>
+        </OrganizationContext.Provider>
+    );
+}
 
-        {/* Notificações Visuais (Sonner) */}
-        <Toaster 
-          richColors 
-          position="top-right" 
-          toastOptions={{
-            className: 'print:hidden'
-          }}
-        />
-      </body>
-    </html>
-  );
+export function useOrganization() {
+    const context = useContext(OrganizationContext);
+    if (context === undefined) {
+        throw new Error('useOrganization deve ser usado dentro de um OrganizationProvider');
+    }
+    return context;
 }
