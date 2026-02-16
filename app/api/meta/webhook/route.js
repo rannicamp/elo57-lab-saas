@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Cliente Admin para operações de background
+// Cliente Admin para operações de banco (pode ler tudo)
 const getSupabaseAdmin = () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SECRET_KEY; 
+    const supabaseKey = process.env.SUPABASE_SECRET_KEY; // Use a SERVICE_ROLE_KEY aqui, não a Anon
     if (!supabaseUrl || !supabaseKey) return null;
     return createClient(supabaseUrl, supabaseKey, {
         auth: { persistSession: false }
@@ -26,9 +26,8 @@ function sanitizePhone(phone) {
     return clean;
 }
 
-// Busca nomes de objetos (Campanha, Anúncio, FORMULÁRIO)
-async function getMetaObjectName(objectId) {
-    const accessToken = process.env.META_PAGE_ACCESS_TOKEN;
+// Busca nomes de objetos usando o token DO CLIENTE
+async function getMetaObjectName(objectId, accessToken) {
     if (!objectId || !accessToken) return null;
     try {
         const url = `https://graph.facebook.com/v20.0/${objectId}?fields=name&access_token=${accessToken}`;
@@ -38,22 +37,6 @@ async function getMetaObjectName(objectId) {
     } catch (error) {
         return null;
     }
-}
-
-async function getOrganizationIdByPageId(supabase, pageId) {
-    const accessToken = process.env.META_PAGE_ACCESS_TOKEN;
-    if (!accessToken) throw new Error("Token Meta não configurado.");
-
-    const url = `https://graph.facebook.com/v20.0/${pageId}?fields=business&access_token=${accessToken}`;
-    const metaResponse = await fetch(url);
-    const metaData = await metaResponse.json();
-    
-    if (!metaData.business?.id) throw new Error(`Página ${pageId} sem Business Manager vinculado.`);
-
-    const { data: empresa } = await supabase.from('cadastro_empresa').select('organizacao_id').eq('meta_business_id', metaData.business.id).single();
-    if (!empresa) throw new Error(`Business ID ${metaData.business.id} não encontrado no sistema.`);
-    
-    return empresa.organizacao_id;
 }
 
 async function ensureFunilAndFirstColumn(supabase, organizacaoId) {
@@ -74,6 +57,7 @@ async function ensureFunilAndFirstColumn(supabase, organizacaoId) {
 
 export async function GET(request) {
     const { searchParams } = new URL(request.url);
+    // META_VERIFY_TOKEN continua fixo no .env (é a senha do app, não do cliente)
     if (searchParams.get('hub.mode') === 'subscribe' && searchParams.get('hub.verify_token') === process.env.META_VERIFY_TOKEN) {
         return new NextResponse(searchParams.get('hub.challenge'), { status: 200 });
     }
@@ -92,36 +76,49 @@ export async function POST(request) {
 
         if (change?.field !== 'leadgen') return new NextResponse(JSON.stringify({ status: 'ignored' }), { status: 200 });
         
-        // Extração dos dados
+        // Extração dos dados básicos
         const { leadgen_id: leadId, page_id: pageId, campaign_id: campaignId, ad_id: adId, adgroup_id: adsetId, form_id: formId } = change.value;
         
+        // --- MUDANÇA CRUCIAL PARA SAAS ---
+        // 1. Descobrir de qual cliente é essa página e pegar o token DELE
+        const { data: integracao } = await supabase
+            .from('integracoes_meta')
+            .select('organizacao_id, access_token')
+            .eq('page_id', pageId) // Procura pela página que gerou o lead
+            .single();
+
+        if (!integracao) {
+            console.error(`ERRO: Página ${pageId} não encontrada em nenhuma integração.`);
+            return new NextResponse(JSON.stringify({ status: 'ignored_unknown_page' }), { status: 200 });
+        }
+
+        const { organizacao_id: organizacaoId, access_token: pageAccessToken } = integracao;
+        // ---------------------------------
+
         // Verifica duplicidade
         const { data: existingLead } = await supabase.from('contatos').select('id').eq('meta_lead_id', leadId).single();
         if (existingLead) return new NextResponse(JSON.stringify({ status: 'lead_exists' }), { status: 200 });
         
-        const organizacaoId = await getOrganizationIdByPageId(supabase, pageId);
-        
-        // 1. Sincroniza metadados e busca nomes
+        // 2. Sincroniza metadados e busca nomes (Usando o token dinâmico)
         let campaignName = null, adsetName = null, adName = null, formName = null;
         
         if (campaignId) {
-            campaignName = await getMetaObjectName(campaignId);
+            campaignName = await getMetaObjectName(campaignId, pageAccessToken);
             await supabase.from('meta_campaigns').upsert({ id: campaignId, name: campaignName, organizacao_id: organizacaoId });
         }
         if (adsetId) {
-            adsetName = await getMetaObjectName(adsetId);
+            adsetName = await getMetaObjectName(adsetId, pageAccessToken);
             await supabase.from('meta_adsets').upsert({ id: adsetId, name: adsetName, campaign_id: campaignId, organizacao_id: organizacaoId });
         }
         if (adId) {
-            adName = await getMetaObjectName(adId);
+            adName = await getMetaObjectName(adId, pageAccessToken);
             await supabase.from('meta_ads').upsert({ id: adId, name: adName, campaign_id: campaignId, adset_id: adsetId, organizacao_id: organizacaoId });
         }
         
-        // 1.1 AUTO-SYNC DO CATÁLOGO DE FORMULÁRIOS
+        // 2.1 AUTO-SYNC DO CATÁLOGO DE FORMULÁRIOS
         if (formId) {
-            formName = await getMetaObjectName(formId);
+            formName = await getMetaObjectName(formId, pageAccessToken);
             if (formName) {
-                // Upsert no catálogo para ficar disponível no mapeamento
                 await supabase.from('meta_forms_catalog').upsert({
                     organizacao_id: organizacaoId,
                     form_id: formId,
@@ -129,29 +126,26 @@ export async function POST(request) {
                     status: 'ACTIVE',
                     last_synced: new Date().toISOString()
                 }, { onConflict: 'organizacao_id,form_id' });
-                console.log(`LOG: Catálogo atualizado via Webhook: ${formName} (${formId})`);
             }
         }
 
-        // 2. Busca dados do Lead
-        const leadRes = await fetch(`https://graph.facebook.com/v20.0/${leadId}?access_token=${process.env.META_PAGE_ACCESS_TOKEN}`);
+        // 3. Busca dados do Lead (Usando o Token do Cliente)
+        const leadRes = await fetch(`https://graph.facebook.com/v20.0/${leadId}?access_token=${pageAccessToken}`);
         const leadDetails = await leadRes.json();
-        if (!leadRes.ok) throw new Error(leadDetails.error?.message || "Erro ao buscar lead");
+        
+        if (!leadRes.ok) throw new Error(leadDetails.error?.message || "Erro ao buscar lead na Meta");
 
         // Monta mapa de respostas
         const formMap = {};
-        leadDetails.field_data.forEach(f => { formMap[f.name] = f.values[0]; });
+        leadDetails.field_data?.forEach(f => { formMap[f.name] = f.values[0]; });
         
-        if (formName) {
-            formMap['form_name'] = formName;
-        }
+        if (formName) formMap['form_name'] = formName;
         
-        const nomeLead = formMap.full_name || `Lead Meta (${new Date().toLocaleDateString()})`;
+        const nomeLead = formMap.full_name || formMap.nome || formMap.name || `Lead Meta (${new Date().toLocaleDateString()})`;
 
-        // 3. APLICAÇÃO DO MAPEAMENTO "DE-PARA" (Versão Direta do Banco)
+        // 4. APLICAÇÃO DO MAPEAMENTO "DE-PARA"
         const extraFields = {};
         if (formId) {
-            // Busca usando campo_destino em vez de join complexo
             const { data: mappings } = await supabase
                 .from('meta_form_config')
                 .select('meta_field_name, campo_destino')
@@ -177,11 +171,10 @@ export async function POST(request) {
                         extraFields[destinationColumn] = finalValue;
                     }
                 });
-                console.log(`LOG: Mapeamento aplicado para Form ${formId}:`, extraFields);
             }
         }
 
-        // 4. Insert Final
+        // 5. Insert Final
         const { data: newContact, error: contactError } = await supabase.from('contatos').insert({
             nome: nomeLead,
             origem: 'Meta Lead Ad',
@@ -199,31 +192,37 @@ export async function POST(request) {
             meta_ad_name: adName,
             meta_campaign_name: campaignName,
             meta_adset_name: adsetName,
-            ...extraFields // Mágica acontecendo aqui
+            ...extraFields
         }).select('id').single();
 
         if (contactError) throw new Error(contactError.message);
         contatoIdParaLimpeza = newContact.id;
 
-        if (formMap.email) await supabase.from('emails').insert({ contato_id: newContact.id, email: formMap.email, tipo: 'Principal', organizacao_id: organizacaoId });
+        // Salvar Email
+        const emailLead = formMap.email || formMap.email_address;
+        if (emailLead) await supabase.from('emails').insert({ contato_id: newContact.id, email: emailLead, tipo: 'Principal', organizacao_id: organizacaoId });
         
-        if (formMap.phone_number) {
-            const finalPhone = sanitizePhone(formMap.phone_number);
+        // Salvar Telefone
+        const phoneLead = formMap.phone_number || formMap.telefone || formMap.celular;
+        if (phoneLead) {
+            const finalPhone = sanitizePhone(phoneLead);
             if (finalPhone) {
                 await supabase.from('telefones').insert({ contato_id: newContact.id, telefone: finalPhone, tipo: 'Celular', organizacao_id: organizacaoId });
             }
         }
         
+        // Colocar no Funil
         const colunaId = await ensureFunilAndFirstColumn(supabase, organizacaoId);
         await supabase.from('contatos_no_funil').insert({ contato_id: newContact.id, coluna_id: colunaId, organizacao_id: organizacaoId });
         
-        console.log(`LOG: Novo Lead processado via Webhook. ID: ${newContact.id}. Form: ${formName || formId}`);
+        console.log(`LOG: Novo Lead processado via Webhook. ID: ${newContact.id}. Cliente: ${organizacaoId}`);
 
         return new NextResponse(JSON.stringify({ status: 'success' }), { status: 200 });
 
     } catch (e) {
         console.error('LOG: [ERRO WEBHOOK]', e.message);
+        // Se criou o contato mas falhou no resto, tenta limpar pra não ficar lead fantasma
         if (contatoIdParaLimpeza) await supabase.from('contatos').delete().eq('id', contatoIdParaLimpeza);
-        return new NextResponse(JSON.stringify({ status: 'error', message: e.message }), { status: 200 }); 
+        return new NextResponse(JSON.stringify({ status: 'error', message: e.message }), { status: 500 }); 
     }
 }

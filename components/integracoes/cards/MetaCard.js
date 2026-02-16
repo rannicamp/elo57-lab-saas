@@ -5,17 +5,16 @@ import Script from 'next/script';
 import { useRouter } from 'next/navigation';
 import { Facebook, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 
+// 🚨 ATENÇÃO: NÃO coloque 'async' nesta linha abaixo!
 export default function MetaCard({ initialData }) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState(initialData?.status ? 'connected' : 'disconnected');
     const [accountName, setAccountName] = useState(initialData?.nome_conta || '');
 
+    // Inicializa o SDK do Facebook assim que o script carregar
     const initFacebookSDK = () => {
-        // Se o SDK já estiver carregado, não faz nada
-        if (window.FB) {
-            return;
-        }
+        if (window.FB) return;
         
         window.fbAsyncInit = function() {
             window.FB.init({
@@ -24,35 +23,37 @@ export default function MetaCard({ initialData }) {
                 xfbml      : true,
                 version    : 'v20.0'
             });
+            console.log("Facebook SDK Inicializado via Script");
         };
     };
 
     const handleLogin = () => {
         setLoading(true);
 
+        // Verificação de segurança: Bloqueadores de anúncio
         if (!window.FB) {
             alert('ERRO: O Facebook SDK não carregou. Verifique se você tem bloqueadores de anúncio (AdBlock) e recarregue a página.');
             setLoading(false);
             return;
         }
 
-        // Timeout de segurança: Se o popup não abrir em 5 segundos (bloqueado), libera o botão
+        // Timer de segurança: Se o popup não abrir em 5s, libera o botão
         const safetyTimer = setTimeout(() => {
             if (loading) {
                 console.warn("Timeout: O Popup demorou demais ou foi bloqueado.");
-                // Opcional: setLoading(false) aqui se quiser forçar a parada, 
-                // mas às vezes o usuário só está demorando para digitar a senha.
+                // Opcional: setLoading(false) aqui se quiser forçar
             }
         }, 5000);
 
+        // Chama o Login do Facebook
         window.FB.login(async (response) => {
-            clearTimeout(safetyTimer); // Cancela o timeout se o usuário respondeu
+            clearTimeout(safetyTimer); // Cancela o timer pois o usuário respondeu
 
             if (response.authResponse) {
-                console.log('Login autorizado! Token:', response.authResponse.accessToken);
+                console.log('Login autorizado! Token recebido.');
                 
                 try {
-                    // Envia o token para o backend trocar e salvar
+                    // Envia o token para o backend (API Route)
                     const res = await fetch('/api/meta/conectar', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -63,11 +64,13 @@ export default function MetaCard({ initialData }) {
 
                     if (!res.ok) throw new Error(data.error || 'Erro desconhecido na API');
 
-                    // Atualiza a interface
+                    // Sucesso: Atualiza a tela
                     setStatus('connected');
                     setAccountName(data.nome_conta);
                     alert(`Conectado com sucesso!`);
-                    router.refresh(); // Atualiza os dados da página (Server Component)
+                    
+                    // Atualiza os dados da página pai (Server Component)
+                    router.refresh(); 
 
                 } catch (error) {
                     console.error("Erro no Backend:", error);
@@ -76,15 +79,17 @@ export default function MetaCard({ initialData }) {
             } else {
                 console.log('Usuário fechou o popup ou cancelou.');
             }
-            setLoading(false); // Para a bolinha de carregamento
+            // Sempre desliga o loading no final
+            setLoading(false); 
         }, {
-            // Permissões necessárias para o SaaS ler Leads e Anúncios
+            // Permissões necessárias para o SaaS
             scope: 'public_profile,email,ads_read,ads_management,pages_show_list,pages_read_engagement,pages_manage_metadata,leads_retrieval'
         });
     };
 
     return (
         <>
+            {/* Carrega o Script do Facebook de forma Otimizada */}
             <Script 
                 src="https://connect.facebook.net/pt_BR/sdk.js" 
                 strategy="lazyOnload" 
@@ -105,8 +110,9 @@ export default function MetaCard({ initialData }) {
                 
                 <h3 className="font-semibold text-lg text-gray-900">Meta Ads (Facebook)</h3>
                 
-                {/* ID para debug (pode remover depois se quiser limpar o visual) */}
-                <p className="text-xs text-gray-300 mt-1">App ID: {process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || 'Carregando...'}</p>
+                <p className="text-xs text-gray-300 mt-1">
+                    App ID: {process.env.NEXT_PUBLIC_FACEBOOK_APP_ID ? 'Carregado' : 'Não Configurado'}
+                </p>
 
                 <p className="text-sm text-gray-500 mt-2 mb-6 h-10">
                     Sincronização automática de Leads, Campanhas e Anúncios.
