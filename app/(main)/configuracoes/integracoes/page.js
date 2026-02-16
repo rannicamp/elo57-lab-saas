@@ -1,73 +1,42 @@
-// app/(main)/configuracoes/integracoes/page.js
-
-import { createClient } from '../../../../utils/supabase/server';
+import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
-import IntegrationsManager from '../../../../components/configuracoes/IntegrationsManager';
 import { getOrganizationId } from '@/utils/getOrganizationId';
+import MetaCard from '@/components/integracoes/cards/MetaCard';
 
 export default async function IntegracoesPage() {
-    const supabase = await createClient();
+    // 👇 A CORREÇÃO ESTÁ AQUI: Adicionado 'await'
+    const supabase = await createClient(); 
 
-    // 1. Proteção de Rota
+    // 1. Segurança
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        redirect('/login');
-    }
+    if (!user) redirect('/login');
 
-    // 2. Busca a organização
+    // 2. Busca Organização
     const organizacaoId = await getOrganizationId(user.id);
-    
-    if (!organizacaoId) {
-        return (
-            <div className="p-4 text-center text-red-600">
-                Erro: Organização do usuário não encontrada. Contate o suporte.
-            </div>
-        );
-    }
+    if (!organizacaoId) return <div className="p-8 text-red-500">Erro: Organização não identificada.</div>;
 
-    // 3. SAAS: Busca Integração Meta (Facebook/Instagram)
+    // 3. Busca Dados da Integração Meta
     const { data: metaIntegration } = await supabase
         .from('integracoes_meta')
-        .select('*')
-        .eq('organizacao_id', organizacaoId)
-        .single(); // Traz apenas 1 ou null
-
-    // 4. SAAS: Busca Integração Google
-    const { data: googleIntegration } = await supabase
-        .from('integracoes_google')
-        .select('*')
-        .eq('organizacao_id', organizacaoId)
-        .single();
-
-    // 5. Mantemos o WhatsApp Legacy (por enquanto)
-    const { data: whatsappConfig } = await supabase
-        .from('configuracoes_whatsapp')
         .select('*')
         .eq('organizacao_id', organizacaoId)
         .single();
 
     return (
-        <div className="space-y-6 container mx-auto px-4 py-8 max-w-6xl">
-            <div className="flex flex-col gap-2">
-                <Link href="/configuracoes" className="text-gray-500 hover:text-primary mb-2 inline-flex items-center gap-2 transition-colors">
-                    &larr; Voltar para Configurações
-                </Link>
-                <h1 className="text-3xl font-bold text-gray-900">Central de Integrações</h1>
-                <p className="text-gray-600 max-w-2xl">
-                    Conecte o Elo 57 às suas ferramentas favoritas de Marketing e Vendas. 
-                    Gerencie suas conexões com Facebook, Instagram, Google e WhatsApp em um só lugar.
-                </p>
-            </div>
+        <div className="container mx-auto px-4 py-8 max-w-5xl">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Central de Integrações</h1>
+            <p className="text-gray-500 mb-8">Gerencie as conexões externas do seu ambiente Elo 57.</p>
 
-            <div className="mt-8">
-                {/* Enviamos tudo para o componente visual */}
-                <IntegrationsManager 
-                    organizacaoId={organizacaoId}
-                    metaIntegration={metaIntegration}
-                    googleIntegration={googleIntegration}
-                    whatsappConfig={whatsappConfig}
-                />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Card do Facebook (Passamos os dados vindos do banco) */}
+                <MetaCard initialData={metaIntegration} />
+
+                {/* Card do Google (Placeholder) */}
+                <div className="border rounded-xl p-6 bg-gray-50 opacity-60">
+                    <h3 className="font-semibold text-lg text-gray-400">Google Ads</h3>
+                    <p className="text-sm text-gray-400 mt-2 mb-4">Em breve...</p>
+                    <button disabled className="w-full py-2 bg-gray-200 text-gray-400 rounded-lg cursor-not-allowed">Indisponível</button>
+                </div>
             </div>
         </div>
     );
