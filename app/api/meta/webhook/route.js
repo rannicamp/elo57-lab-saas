@@ -29,7 +29,6 @@ function sanitizePhone(phone) {
 // 🔥 NOVA FUNÇÃO: Busca a coluna "ENTRADA" do SISTEMA (Org 1)
 async function getSystemEntryColumn(supabase) {
     // Busca a coluna 'ENTRADA' que pertence à organização mestre (ID 1)
-    // Se o ID da sua organização mestre for 2 (como no SQL enviado), mude para .eq('organizacao_id', 2)
     const { data: coluna } = await supabase
         .from('colunas_funil')
         .select('id')

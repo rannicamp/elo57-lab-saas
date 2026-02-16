@@ -95,8 +95,14 @@ const AddContactModal = ({ isOpen, onClose, onSearch, results, onAddContact, exi
 const fetchFunilData = async (supabase, organizacaoId, filters) => {
     if (!organizacaoId) return { funilId: null, colunasDoFunil: [], contatosNoFunil: [] };
 
-    // 1. Busca o Funil do Cliente
-    const { data: funilData } = await supabase.from('funis').select('id').eq('nome', 'Funil de Vendas').eq('organizacao_id', organizacaoId).single();
+    // 1. Busca o Funil do Cliente (Usa maybeSingle para evitar erro 406 se não existir)
+    const { data: funilData } = await supabase
+        .from('funis')
+        .select('id')
+        .eq('nome', 'Funil de Vendas')
+        .eq('organizacao_id', organizacaoId)
+        .maybeSingle(); // <--- CORREÇÃO DO ERRO 406
+
     const funilId = funilData?.id;
 
     // 2. Busca Colunas do Cliente (Se existirem)
@@ -110,15 +116,14 @@ const fetchFunilData = async (supabase, organizacaoId, filters) => {
     }
 
     // 3. Busca Colunas do SISTEMA (Org 1 - Entrada, Vendido, Perdido)
-    // O RLS deve permitir a leitura onde organizacao_id = 1
     const { data: systemColumns, error: sysError } = await supabase.from('colunas_funil')
         .select('id, nome, ordem')
-        .eq('organizacao_id', 1)
+        .eq('organizacao_id', 1) // ID do Admin
         .in('nome', ['ENTRADA', 'VENDIDO', 'PERDIDO']);
     
     if (sysError) console.error("Erro ao buscar colunas do sistema:", sysError);
 
-    // 4. Mistura e Ordena (Entrada=0 vai pro topo, Vendido=90 vai pro fim)
+    // 4. Mistura e Ordena
     const todasColunas = [...(systemColumns || []), ...userColumns].sort((a, b) => a.ordem - b.ordem);
 
     // 5. Busca os Contatos (Leads)
@@ -138,24 +143,12 @@ const fetchFunilData = async (supabase, organizacaoId, filters) => {
     if (filters.searchTerm) {
         query = query.or(`nome.ilike.%${filters.searchTerm}%,razao_social.ilike.%${filters.searchTerm}%`, { foreignTable: 'contatos' });
     }
-    if (filters.corretorIds?.length > 0) {
-        query = query.in('corretor_id', filters.corretorIds);
-    }
-    if (filters.origens?.length > 0) {
-        query = query.in('contatos.origem', filters.origens);
-    }
-    if (filters.campaignIds?.length > 0) {
-        query = query.in('contatos.meta_campaign_id', filters.campaignIds);
-    }
-    if (filters.adIds?.length > 0) {
-        query = query.in('contatos.meta_ad_id', filters.adIds);
-    }
-    if (filters.startDate) {
-        query = query.gte('created_at', filters.startDate + 'T00:00:00');
-    }
-    if (filters.endDate) {
-        query = query.lte('created_at', filters.endDate + 'T23:59:59');
-    }
+    if (filters.corretorIds?.length > 0) query = query.in('corretor_id', filters.corretorIds);
+    if (filters.origens?.length > 0) query = query.in('contatos.origem', filters.origens);
+    if (filters.campaignIds?.length > 0) query = query.in('contatos.meta_campaign_id', filters.campaignIds);
+    if (filters.adIds?.length > 0) query = query.in('contatos.meta_ad_id', filters.adIds);
+    if (filters.startDate) query = query.gte('created_at', filters.startDate + 'T00:00:00');
+    if (filters.endDate) query = query.lte('created_at', filters.endDate + 'T23:59:59');
 
     if (filters.unidadeIds?.length > 0) {
         const { data: funilProductLinks, error: linkError } = await supabase
