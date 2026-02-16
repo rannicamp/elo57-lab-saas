@@ -11,7 +11,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
     faSpinner, faTimes, faSearch, faPlus, faUsers, faHandshake, 
     faPercent, faSackDollar, faCalendarDay, faRobot, faFilter, faLayerGroup,
-    faTable // <--- Novo ícone para o botão de Mapeamento
+    faTable
 } from '@fortawesome/free-solid-svg-icons';
 import { toast } from 'sonner';
 import { differenceInCalendarDays, startOfDay } from 'date-fns';
@@ -24,7 +24,7 @@ import AtividadeModal from '@/components/atividades/AtividadeModal';
 import KpiCard from '@/components/shared/KpiCard';
 import FiltroCrm from '@/components/crm/FiltroCrm';
 import NewConversationModal from '@/components/whatsapp/NewConversationModal';
-import MetaFormMappingModal from '@/components/crm/MetaFormMappingModal'; // <--- Importação do Novo Modal
+import MetaFormMappingModal from '@/components/crm/MetaFormMappingModal';
 
 // --- CHAVE ÚNICA PARA O LOCALSTORAGE (PERSISTÊNCIA) ---
 const CRM_UI_STATE_KEY = 'STUDIO57_CRM_UI_STATE_V1';
@@ -91,17 +91,39 @@ const AddContactModal = ({ isOpen, onClose, onSearch, results, onAddContact, exi
     );
 };
 
+// --- NOVA LÓGICA DE BUSCA DO FUNIL (MISTO: CLIENTE + SISTEMA) ---
 const fetchFunilData = async (supabase, organizacaoId, filters) => {
     if (!organizacaoId) return { funilId: null, colunasDoFunil: [], contatosNoFunil: [] };
 
+    // 1. Busca o Funil do Cliente
     const { data: funilData } = await supabase.from('funis').select('id').eq('nome', 'Funil de Vendas').eq('organizacao_id', organizacaoId).single();
     const funilId = funilData?.id;
-    if (!funilId) return { funilId: null, colunasDoFunil: [], contatosNoFunil: [] };
+
+    // 2. Busca Colunas do Cliente (Se existirem)
+    let userColumns = [];
+    if (funilId) {
+        const { data: cols } = await supabase.from('colunas_funil')
+            .select('id, nome, ordem')
+            .eq('funil_id', funilId)
+            .eq('organizacao_id', organizacaoId);
+        if (cols) userColumns = cols;
+    }
+
+    // 3. Busca Colunas do SISTEMA (Org 1 - Entrada, Vendido, Perdido)
+    // O RLS deve permitir a leitura onde organizacao_id = 1
+    const { data: systemColumns, error: sysError } = await supabase.from('colunas_funil')
+        .select('id, nome, ordem')
+        .eq('organizacao_id', 1)
+        .in('nome', ['ENTRADA', 'VENDIDO', 'PERDIDO']);
     
-    const { data: colunasDoFunil, error: colunasError } = await supabase.from('colunas_funil').select('id, nome, ordem').eq('funil_id', funilId).eq('organizacao_id', organizacaoId).order('ordem', { ascending: true });
-    if (colunasError) throw colunasError;
-    if (!colunasDoFunil || colunasDoFunil.length === 0) return { funilId, colunasDoFunil: [], contatosNoFunil: [] };
-    
+    if (sysError) console.error("Erro ao buscar colunas do sistema:", sysError);
+
+    // 4. Mistura e Ordena (Entrada=0 vai pro topo, Vendido=90 vai pro fim)
+    const todasColunas = [...(systemColumns || []), ...userColumns].sort((a, b) => a.ordem - b.ordem);
+
+    // 5. Busca os Contatos (Leads)
+    // Nota: O contato pertence à Organização do Cliente (organizacaoId),
+    // mas pode estar numa coluna do Sistema (coluna_id da Org 1).
     let query = supabase.from('contatos_no_funil').select(`
         id, coluna_id, numero_card, corretor_id, created_at,
         contatos:contato_id!inner(*, telefones(telefone, tipo), emails(email, tipo)),
@@ -109,8 +131,10 @@ const fetchFunilData = async (supabase, organizacaoId, filters) => {
         produtos_interesse:contatos_no_funil_produtos(id, produto:produtos_empreendimento(id, unidade, tipo, valor_venda_calculado, empreendimento_id))
     `);
     
+    // Filtra apenas contatos DESTA organização
     query = query.eq('organizacao_id', organizacaoId);
 
+    // Filtros Avançados
     if (filters.searchTerm) {
         query = query.or(`nome.ilike.%${filters.searchTerm}%,razao_social.ilike.%${filters.searchTerm}%`, { foreignTable: 'contatos' });
     }
@@ -141,7 +165,7 @@ const fetchFunilData = async (supabase, organizacaoId, filters) => {
         if (linkError) throw linkError;
         const matchingFunilIds = (funilProductLinks || []).map(link => link.contato_no_funil_id);
         if (matchingFunilIds.length === 0) {
-             return { funilId, colunasDoFunil, contatosNoFunil: [] };
+             return { funilId, colunasDoFunil: todasColunas, contatosNoFunil: [] };
         }
         query = query.in('id', matchingFunilIds);
     }
@@ -151,7 +175,7 @@ const fetchFunilData = async (supabase, organizacaoId, filters) => {
 
     const contatosParaEstado = (contatosNoFunilRaw || []).filter(item => item.contatos?.id);
     
-    return { funilId, colunasDoFunil, contatosNoFunil: contatosParaEstado };
+    return { funilId, colunasDoFunil: todasColunas, contatosNoFunil: contatosParaEstado };
 };
 
 const fetchFilterData = async (supabase, organizacaoId) => {
@@ -195,20 +219,15 @@ export default function CrmPage() {
     const { setPageTitle } = useLayout();
     const { user, userData } = useAuth();
     const organizacaoId = user?.organizacao_id;
-
-    // CORREÇÃO: createClient síncrono para Client Component
     const supabase = createClient();
     const queryClient = useQueryClient();
 
-    // Estado Persistente
     const cachedState = getCachedUiState();
     const defaultFilters = { searchTerm: '', corretorIds: [], origens: [], unidadeIds: [], campaignIds: [], adIds: [], startDate: '', endDate: new Date().toISOString().split('T')[0] };
 
     const [filters, setFilters] = useState(cachedState?.filters || defaultFilters);
     const [sorting, setSorting] = useState(cachedState?.sorting || {});
-    // Novo estado para controlar a visibilidade dos filtros
     const [showFilters, setShowFilters] = useState(false); 
-    
     const [debouncedFilters] = useDebounce(filters, 500);
 
     useEffect(() => {
@@ -229,11 +248,8 @@ export default function CrmPage() {
     const [activityToEdit, setActivityToEdit] = useState(null);
     const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
 
-    // --- ESTADOS PARA O MODAL DO WHATSAPP ---
     const [isWhatsModalOpen, setIsWhatsModalOpen] = useState(false);
     const [contactForWhats, setContactForWhats] = useState(null);
-
-    // --- ESTADOS PARA O MODAL DE MAPEAMENTO META ---
     const [isMetaMappingOpen, setIsMetaMappingOpen] = useState(false);
 
     useEffect(() => { if (setPageTitle) setPageTitle("CRM - Funil de Vendas"); }, [setPageTitle]);
@@ -259,7 +275,10 @@ export default function CrmPage() {
     const kpiData = useMemo(() => {
         const dataToAnalyze = contatosNoFunil; 
         if (!colunasDoFunil || dataToAnalyze.length === 0) return { totalLeads: 0, vendidos: 0, taxaConversao: 0, valorEmNegociacao: 0, ultimoLead: 'N/A' };
+        
+        // Agora buscamos a coluna VENDIDO de forma agnóstica (pode ser do sistema ou do user)
         const colunaVendido = colunasDoFunil.find(c => c.nome.toLowerCase() === 'vendido');
+        
         const totalLeads = dataToAnalyze.length;
         const vendidos = dataToAnalyze.filter(c => c.coluna_id === colunaVendido?.id).length;
         const taxaConversao = totalLeads > 0 ? (vendidos / totalLeads) * 100 : 0;
@@ -291,7 +310,30 @@ export default function CrmPage() {
         onError: (error) => { toast.error(`Erro ao mover o card: ${error.message}`); }
     });
 
-    const addContactMutation = useMutation({ mutationFn: async (contactId) => { const { data: primeiraColuna } = await supabase.from('colunas_funil').select('id').eq('funil_id', funilId).eq('organizacao_id', organizacaoId).order('ordem').limit(1).single(); if (!primeiraColuna) throw new Error("Coluna inicial não encontrada."); await supabase.from('contatos_no_funil').insert({ contato_id: contactId, coluna_id: primeiraColuna.id, organizacao_id: organizacaoId }).throwOnError(); return "Contato adicionado!"; }, onSuccess: (message) => { setIsAddContactModalOpen(false); mutationOptions.onSuccess(message); }, onError: mutationOptions.onError });
+    // --- NOVA ADIÇÃO DE CONTATO: Usa Coluna Mestre ENTRADA (Org 1) ---
+    const addContactMutation = useMutation({ 
+        mutationFn: async (contactId) => { 
+            // Busca a coluna ENTRADA do Sistema (Org 1)
+            const { data: colunaEntrada } = await supabase
+                .from('colunas_funil')
+                .select('id')
+                .eq('organizacao_id', 1)
+                .eq('nome', 'ENTRADA')
+                .single();
+
+            if (!colunaEntrada) throw new Error("Coluna 'ENTRADA' do sistema não encontrada.");
+
+            await supabase.from('contatos_no_funil').insert({ 
+                contato_id: contactId, 
+                coluna_id: colunaEntrada.id, // Usa ID do Sistema
+                organizacao_id: organizacaoId 
+            }).throwOnError(); 
+            return "Contato adicionado!"; 
+        }, 
+        onSuccess: (message) => { setIsAddContactModalOpen(false); mutationOptions.onSuccess(message); }, 
+        onError: mutationOptions.onError 
+    });
+
     const createColumnMutation = useMutation({ mutationFn: async (name) => { await supabase.from('colunas_funil').insert({ nome: name, funil_id: funilId, ordem: colunasDoFunil.length, organizacao_id: organizacaoId }).throwOnError(); return "Etapa criada!"; }, ...mutationOptions });
     const reorderColumnsMutation = useMutation({ mutationFn: async (cols) => { const updates = cols.map(c => supabase.from('colunas_funil').update({ ordem: c.ordem }).eq('id', c.id)); await Promise.all(updates); return "Ordem salva!"; }, ...mutationOptions });
     const deleteColumnCardsMutation = useMutation({ mutationFn: async (colId) => { await supabase.from('contatos_no_funil').delete().eq('coluna_id', colId).throwOnError(); return "Cards excluídos!"; }, ...mutationOptions });
@@ -299,32 +341,39 @@ export default function CrmPage() {
     const dissociateProductMutation = useMutation({ mutationFn: async (id) => { await supabase.from('contatos_no_funil_produtos').delete().eq('id', id).throwOnError(); return "Produto removido!"; }, ...mutationOptions });
     const associateCorretorMutation = useMutation({ mutationFn: async ({ contactId, corretorId }) => { await supabase.from('contatos_no_funil').update({ corretor_id: corretorId }).eq('id', contactId).throwOnError(); return "Corretor associado!"; }, ...mutationOptions });
     const editColumnMutation = useMutation({ mutationFn: async ({ columnId, newName }) => { const { error } = await supabase.from('colunas_funil').update({ nome: newName }).eq('id', columnId).eq('organizacao_id', organizacaoId); if (error) throw error; return "Nome da etapa atualizado!"; }, ...mutationOptions });
-    const deleteColumnMutation = useMutation({ mutationFn: async (columnIdToDelete) => { const { data: firstColumn, error: firstColumnError } = await supabase.from('colunas_funil').select('id').eq('funil_id', funilId).eq('organizacao_id', organizacaoId).order('ordem', { ascending: true }).limit(1).single(); if (firstColumnError || !firstColumn) throw new Error('Não foi possível encontrar a coluna de destino para os contatos.'); if (columnIdToDelete === firstColumn.id) throw new Error('Não é possível excluir a primeira coluna do funil.'); const { error: moveError } = await supabase.from('contatos_no_funil').update({ coluna_id: firstColumn.id }).eq('coluna_id', columnIdToDelete); if (moveError) throw new Error(`Erro ao mover os contatos: ${moveError.message}`); const { error: deleteError } = await supabase.from('colunas_funil').delete().eq('id', columnIdToDelete); if (deleteError) throw new Error(`Erro ao excluir a coluna: ${deleteError.message}`); return "Etapa excluída! Os contatos foram movidos para a primeira etapa."; }, ...mutationOptions });
+    
+    // --- NOVA EXCLUSÃO DE COLUNA: Move para ENTRADA (Org 1) por segurança ---
+    const deleteColumnMutation = useMutation({ 
+        mutationFn: async (columnIdToDelete) => { 
+            // Busca coluna de destino (ENTRADA - Org 1)
+            const { data: firstColumn } = await supabase.from('colunas_funil').select('id').eq('organizacao_id', 1).eq('nome', 'ENTRADA').single();
+            if (!firstColumn) throw new Error('Coluna de destino (ENTRADA) não encontrada.');
+            
+            if (columnIdToDelete === firstColumn.id) throw new Error('Não é possível excluir a coluna mestre ENTRADA.');
+            
+            // Move contatos
+            const { error: moveError } = await supabase.from('contatos_no_funil').update({ coluna_id: firstColumn.id }).eq('coluna_id', columnIdToDelete);
+            if (moveError) throw new Error(`Erro ao mover os contatos: ${moveError.message}`);
+            
+            // Deleta coluna
+            const { error: deleteError } = await supabase.from('colunas_funil').delete().eq('id', columnIdToDelete);
+            if (deleteError) throw new Error(`Erro ao excluir a coluna: ${deleteError.message}`);
+            
+            return "Etapa excluída! Contatos movidos para ENTRADA."; 
+        }, ...mutationOptions 
+    });
 
     const [debounceSearchTimeout, setDebounceSearchTimeout] = useState(null);
     const handleSearch = (term) => { clearTimeout(debounceSearchTimeout); if (!term.trim() || term.length < 2) { setSearchResults([]); return; } setDebounceSearchTimeout(setTimeout(async () => { const { data } = await supabase.rpc('buscar_contatos_geral', { p_search_term: term, p_organizacao_id: organizacaoId }); setSearchResults(data || []); }, 300)); };
     const openAddContactModal = () => { setSearchResults([]); setIsAddContactModalOpen(true); };
     const handleStatusChange = (contactId, columnId) => handleStatusChangeMutation.mutate({ contatoNoFunilId: contactId, newColumnId: columnId });
     
-    // --- FUNÇÃO PARA INICIAR WHATSAPP ---
     const handleStartWhatsApp = (entry) => {
         const contact = entry.contatos;
         if (!contact) return;
-
-        // Pega o telefone (tenta array ou campo direto)
         const phone = contact.telefones?.[0]?.telefone || contact.telefones?.[0] || contact.telefone;
-
-        if (!phone) {
-             toast.error("Este contato não possui telefone cadastrado.");
-             return;
-        }
-
-        // Prepara o objeto para o Modal (formato esperado)
-        setContactForWhats({
-            id: contact.id,
-            nome: contact.nome || contact.razao_social || 'Cliente',
-            telefones: [{ telefone: phone }] 
-        });
+        if (!phone) { toast.error("Este contato não possui telefone cadastrado."); return; }
+        setContactForWhats({ id: contact.id, nome: contact.nome || contact.razao_social || 'Cliente', telefones: [{ telefone: phone }] });
         setIsWhatsModalOpen(true);
     };
 
@@ -334,7 +383,6 @@ export default function CrmPage() {
             {isActivityModalOpen && (<AtividadeModal isOpen={isActivityModalOpen} onClose={() => { setIsActivityModalOpen(false); setContactForNewActivity(null); setActivityToEdit(null); }} onActivityAdded={() => { if (isSidebarOpen) setSidebarRefreshKey(p => p + 1); }} activityToEdit={activityToEdit} initialContatoId={contactForNewActivity?.id} funcionarios={funcionarios} allEmpresas={empresas} />)}
 
             <div className="flex-shrink-0 bg-white shadow-sm p-6 space-y-6">
-                {/* HEADLINE E FERRAMENTAS - Layout inspirado na página de contatos */}
                 <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
                     <div className="flex items-center gap-3">
                         <h1 className="text-3xl font-bold text-gray-800">Funil de Vendas</h1>
@@ -344,64 +392,31 @@ export default function CrmPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2 items-center w-full xl:w-auto">
-                        {/* Barra de Busca Integrada */}
                         <div className="relative flex-grow xl:flex-grow-0 min-w-[200px]">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <FontAwesomeIcon icon={faSearch} className="text-gray-400" />
                             </div>
-                            <input 
-                                type="text" 
-                                placeholder="Buscar no funil..." 
-                                value={filters.searchTerm} 
-                                onChange={(e) => setFilters(prev => ({ ...prev, searchTerm: e.target.value }))} 
-                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                            />
+                            <input type="text" placeholder="Buscar no funil..." value={filters.searchTerm} onChange={(e) => setFilters(prev => ({ ...prev, searchTerm: e.target.value }))} className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"/>
                         </div>
-
-                        {/* Botão de Filtro Toggle */}
-                        <button 
-                            onClick={() => setShowFilters(!showFilters)} 
-                            className={`border font-medium py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-200 ${showFilters ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
-                            title="Filtros Avançados"
-                        >
-                            <FontAwesomeIcon icon={faFilter} className={showFilters ? "text-blue-500 mr-2" : "text-gray-500 mr-2"} />
-                            Filtros
+                        <button onClick={() => setShowFilters(!showFilters)} className={`border font-medium py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-200 ${showFilters ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`} title="Filtros Avançados">
+                            <FontAwesomeIcon icon={faFilter} className={showFilters ? "text-blue-500 mr-2" : "text-gray-500 mr-2"} /> Filtros
                         </button>
-
-                        {/* BOTÃO NOVO: Mapear Meta */}
-                        <button 
-                            onClick={() => setIsMetaMappingOpen(true)}
-                            className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-200"
-                            title="Mapear Campos do Formulário Meta"
-                        >
-                            <FontAwesomeIcon icon={faTable} className="text-blue-600 mr-2" />
-                            Mapear Meta
+                        <button onClick={() => setIsMetaMappingOpen(true)} className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-200" title="Mapear Campos do Formulário Meta">
+                            <FontAwesomeIcon icon={faTable} className="text-blue-600 mr-2" /> Mapear Meta
                         </button>
-
                         <Link href="/crm/automacao" className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-200">
                             <FontAwesomeIcon icon={faRobot} className="text-purple-500 mr-2" /> Automações
                         </Link>
-                        
                         <button onClick={openAddContactModal} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow flex items-center transition duration-200">
                             <FontAwesomeIcon icon={faPlus} className="mr-2" /> Novo Lead
                         </button>
                     </div>
                 </div>
 
-                {/* PAINEL DE FILTROS - Aparece apenas quando showFilters é true */}
                 {showFilters && (
-                    <FiltroCrm
-                        filters={filters}
-                        setFilters={setFilters}
-                        corretores={filterOptions?.corretores}
-                        unidades={filterOptions?.unidades}
-                        origens={filterOptions?.origens}
-                        campaigns={filterOptions?.campaigns}
-                        ads={filterOptions?.ads}
-                    />
+                    <FiltroCrm filters={filters} setFilters={setFilters} corretores={filterOptions?.corretores} unidades={filterOptions?.unidades} origens={filterOptions?.origens} campaigns={filterOptions?.campaigns} ads={filterOptions?.ads} />
                 )}
 
-                {/* KPIs - Design mais limpo e cards menores para economizar espaço */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-2">
                     <KpiCard title="Total" value={kpiData.totalLeads} icon={faUsers} />
                     <KpiCard title="Vendidos" value={kpiData.vendidos} icon={faHandshake} />
@@ -442,20 +457,8 @@ export default function CrmPage() {
             </div>
             <AddContactModal isOpen={isAddContactModalOpen} onClose={() => setIsAddContactModalOpen(false)} onSearch={handleSearch} results={searchResults} onAddContact={(id) => addContactMutation.mutate(id)} existingContactIds={(contatosNoFunil || []).map(c => c.contatos?.id).filter(Boolean)} />
             <CrmNotesModal isOpen={isNotesModalOpen} onClose={() => setIsNotesModalOpen(false)} contatoNoFunilId={currentContactFunilIdForNotes} contatoId={currentContactIdForNotes} />
-            
-            {/* Modal do WhatsApp */}
-            <NewConversationModal
-                isOpen={isWhatsModalOpen}
-                onClose={() => setIsWhatsModalOpen(false)}
-                preSelectedContact={contactForWhats}
-            />
-
-            {/* Modal de Mapeamento do Meta */}
-            <MetaFormMappingModal
-                isOpen={isMetaMappingOpen}
-                onClose={() => setIsMetaMappingOpen(false)}
-                organizacaoId={organizacaoId}
-            />
+            <NewConversationModal isOpen={isWhatsModalOpen} onClose={() => setIsWhatsModalOpen(false)} preSelectedContact={contactForWhats} />
+            <MetaFormMappingModal isOpen={isMetaMappingOpen} onClose={() => setIsMetaMappingOpen(false)} organizacaoId={organizacaoId} />
         </div>
     );
 }
