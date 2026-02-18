@@ -1,110 +1,93 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 
-const APP_ID = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
-const APP_SECRET = process.env.FACEBOOK_CLIENT_SECRET;
+// GET: Gera a URL de Login para o Botão (O Porteiro)
+export async function GET(request) {
+  try {
+    // 1. Definição das Permissões (Escopos) que o Elo 57 precisa
+    const permissions = [
+      // 'email', <--- Mantido desligado para evitar erro de "Invalid Scope" no seu painel atual
+      'public_profile', 
+      'ads_management',        // Criar/Editar Anúncios
+      'ads_read',             // Ler relatórios de performance
+      'business_management',   // Gerenciar Business Manager
+      'pages_manage_ads',     // Postar anúncios na página
+      'pages_read_engagement', // Ler comentários/posts
+      'pages_show_list',      // Listar as páginas para selecionar
+      'leads_retrieval'       // Baixar os leads (Vital!)
+    ];
 
-// --- ROTA DE CONEXÃO (POST) ---
-export async function POST(request) {
-    try {
-        const supabase = await createClient();
-        
-        // 1. Segurança: Pega usuário logado
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    const appId = process.env.FACEBOOK_APP_ID;
+    const redirectUri = process.env.FACEBOOK_CALLBACK_URL;
+    const state = 'elo57_auth_flow'; // Segurança contra CSRF
 
-        const body = await request.json();
-        const { shortToken } = body;
-        
-        // 2. Troca Token Curto por Longo (Long-Lived Access Token)
-        const tokenUrl = `https://graph.facebook.com/v20.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${APP_ID}&client_secret=${APP_SECRET}&fb_exchange_token=${shortToken}`;
-        
-        const tokenRes = await fetch(tokenUrl);
-        const tokenData = await tokenRes.json();
-        
-        if (tokenData.error) throw new Error(`Erro ao gerar token longo: ${tokenData.error.message}`);
-        
-        const longToken = tokenData.access_token;
+    // Garante que a versão da API está correta no .env ou usa v19.0 como fallback seguro
+    const apiVersion = process.env.FACEBOOK_API_VERSION || 'v19.0';
 
-        // 3. Pega dados do Usuário do Facebook e suas Páginas
-        const meRes = await fetch(`https://graph.facebook.com/v20.0/me?fields=id,name,accounts{access_token,id,name,category}&access_token=${longToken}`);
-        const meData = await meRes.json();
-        
-        if (meData.error) throw new Error(meData.error.message);
+    console.log('🔵 [Meta Connect] Iniciando geração de URL de login...');
+    console.log('🔹 App ID:', appId ? 'OK (Carregado)' : 'ERRO (Faltando)');
+    console.log('🔹 Callback URL:', redirectUri);
 
-        // ATENÇÃO: Pega a primeira página por padrão
-        const page = meData.accounts?.data?.[0];
-
-        if (!page) throw new Error("Nenhuma página do Facebook encontrada nesta conta.");
-
-        // 4. Pega ID da Organização no Supabase
-        const { data: usuarioData } = await supabase
-            .from('usuarios')
-            .select('organizacao_id')
-            .eq('id', user.id)
-            .single();
-            
-        if (!usuarioData?.organizacao_id) throw new Error('Usuário sem organização.');
-
-        // 5. Salva Tudo no Banco (Upsert)
-        const { error: dbError } = await supabase
-            .from('integracoes_meta')
-            .upsert({
-                organizacao_id: usuarioData.organizacao_id,
-                access_token: page.access_token, // Token da Página
-                page_id: page.id,
-                nome_conta: page.name,
-                meta_user_id: meData.id,
-                status: true,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'organizacao_id' });
-
-        if (dbError) throw new Error(dbError.message);
-
-        return NextResponse.json({ success: true, nome_conta: page.name, page_id: page.id });
-
-    } catch (error) {
-        console.error('Erro API Conectar:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!appId || !redirectUri) {
+        throw new Error('Configurações de ambiente (App ID ou Callback) ausentes.');
     }
+
+    // Monta a URL oficial do Facebook
+    const loginUrl = `https://www.facebook.com/${apiVersion}/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${permissions.join(',')}`;
+
+    return NextResponse.json({ url: loginUrl });
+
+  } catch (error) {
+    console.error('🔴 [Meta Connect] Erro ao gerar URL:', error);
+    return NextResponse.json({ error: 'Erro interno ao iniciar conexão.' }, { status: 500 });
+  }
 }
 
-// --- NOVA ROTA DE DESCONEXÃO (DELETE) ---
+// DELETE: Desconecta a conta (Remove do Banco de Dados)
 export async function DELETE(request) {
-    try {
-        const supabase = await createClient();
-
-        // 1. Verifica Usuário
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-        }
-
-        // 2. Busca Organização do Usuário
-        const { data: usuarioData } = await supabase
-            .from('usuarios')
-            .select('organizacao_id')
-            .eq('id', user.id)
-            .single();
-
-        if (!usuarioData?.organizacao_id) {
-            return NextResponse.json({ error: 'Organização não encontrada' }, { status: 400 });
-        }
-
-        // 3. Apaga a linha da tabela de integração
-        const { error: deleteError } = await supabase
-            .from('integracoes_meta')
-            .delete()
-            .eq('organizacao_id', usuarioData.organizacao_id);
-
-        if (deleteError) {
-            throw new Error(deleteError.message);
-        }
-
-        return NextResponse.json({ status: 'success', message: 'Desconectado com sucesso' });
-
-    } catch (error) {
-        console.error('Erro API Desconectar:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+  console.log('🔵 [Meta Connect] Solicitação de desconexão recebida.');
+  
+  try {
+    const supabase = await createClient();
+    
+    // 1. Segurança: Quem é o usuário?
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.warn('🟠 [Meta Connect] Tentativa de desconexão sem usuário logado.');
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
+
+    // 2. Busca a Organização do usuário
+    const { data: userData, error: userError } = await supabase
+      .from('usuarios')
+      .select('organizacao_id')
+      .eq('id', user.id)
+      .single();
+
+    if (userError || !userData?.organizacao_id) {
+      console.error('🔴 [Meta Connect] Organização não encontrada para o usuário:', user.id);
+      return NextResponse.json({ error: 'Organização não encontrada' }, { status: 400 });
+    }
+
+    console.log(`🟢 [Meta Connect] Removendo integração da Org ID: ${userData.organizacao_id}`);
+
+    // 3. Remove a integração desta organização
+    const { error: deleteError } = await supabase
+      .from('integracoes_meta')
+      .delete()
+      .eq('organizacao_id', userData.organizacao_id);
+
+    if (deleteError) {
+      console.error('🔴 [Meta Connect] Erro ao deletar do banco:', deleteError);
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+
+    console.log(`✅ [Meta Connect] Integração removida com sucesso!`);
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    console.error('💥 [Meta Connect] Erro fatal no DELETE:', error);
+    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
+  }
 }
