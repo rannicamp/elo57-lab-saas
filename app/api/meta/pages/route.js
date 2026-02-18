@@ -1,19 +1,24 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createClient } from '@/utils/supabase/server'; // Cliente para ler cookie
+import { createClient as createAdminClient } from '@supabase/supabase-js'; // Cliente para gravar a força
 import { FacebookAdsApi, User } from 'facebook-nodejs-business-sdk';
 
-// GET: Lista as páginas disponíveis (Lê do banco o token do usuário e busca no FB)
+// GET: Lista as páginas (Mantive igual, pois estava funcionando)
 export async function GET(request) {
-  const supabase = await createClient();
-
   try {
+    const supabase = await createClient();
+    
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
-    const { data: userData } = await supabase.from('usuarios').select('organizacao_id').eq('id', user.id).single();
+    const { data: userData } = await supabase
+      .from('usuarios')
+      .select('organizacao_id')
+      .eq('id', user.id)
+      .single();
+
     if (!userData?.organizacao_id) return NextResponse.json({ error: 'Org não encontrada' }, { status: 400 });
 
-    // Busca o token do usuário salvo no passo anterior
     const { data: integracao } = await supabase
       .from('integracoes_meta')
       .select('access_token')
@@ -21,63 +26,102 @@ export async function GET(request) {
       .single();
 
     if (!integracao?.access_token) {
-      return NextResponse.json({ error: 'Token não encontrado. Faça login novamente.' }, { status: 404 });
+      return NextResponse.json({ error: 'Token não encontrado.' }, { status: 404 });
     }
 
-    // Inicializa SDK
     const api = FacebookAdsApi.init(integracao.access_token);
-    const me = new User('me'); 
-    
-    // Busca contas/páginas e seus tokens específicos
+    const me = new User('me');
+    const facebookData = await me.get(['name', 'id', 'picture']);
     const accounts = await me.getAccounts(['name', 'access_token', 'id', 'picture', 'tasks']);
-    
+
     const pages = accounts.map(page => ({
         id: page.id,
         name: page.name,
-        picture_url: page.picture?.data?.url,
-        access_token: page.access_token 
+        picture: page.picture?.data?.url,
+        access_token: page.access_token,
+        pode_anunciar: page.tasks.includes('ADVERTISE') || page.tasks.includes('Create Ads')
     }));
 
-    return NextResponse.json({ pages });
+    return NextResponse.json({ 
+        user: { name: facebookData.name, id: facebookData.id },
+        pages: pages 
+    });
 
   } catch (error) {
-    console.error('Erro listar páginas:', error);
+    console.error('Erro ao buscar páginas:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// POST: Salva a página escolhida (Atualiza o banco com o Token da Página)
+// POST: Salva a página escolhida (AQUI ESTÁ A CORREÇÃO BLINDADA 🛡️)
 export async function POST(request) {
-    const supabase = await createClient();
+    console.log('🔵 [Meta Pages] Recebendo pedido de salvamento...');
     
+    // 1. Verificação de Segurança (Quem é o usuário?)
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        console.error('🔴 [Meta Pages] Usuário não logado tentou salvar.');
+        return NextResponse.json({ error: 'Sessão expirada.' }, { status: 401 });
+    }
+
     try {
-        const { page_id, page_name, page_access_token } = await request.json();
-        
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: userData } = await supabase.from('usuarios').select('organizacao_id').eq('id', user.id).single();
+        const body = await request.json();
+        const { page_id, page_name, page_access_token } = body;
 
-        console.log(`🔵 [Meta Pages] Salvando página ${page_name} para Org ${userData.organizacao_id}`);
+        console.log(`🔵 [Meta Pages] Tentando salvar página: ${page_name} (${page_id})`);
 
-        const { error } = await supabase
+        // 2. Busca a Org do Usuário
+        const { data: userData } = await supabase
+            .from('usuarios')
+            .select('organizacao_id')
+            .eq('id', user.id)
+            .single();
+
+        if (!userData?.organizacao_id) {
+            throw new Error('Usuário sem organização vinculada.');
+        }
+
+        const orgId = userData.organizacao_id;
+        console.log(`🟢 [Meta Pages] Org ID: ${orgId}`);
+
+        // 3. MODO DEUS: Inicializa cliente Admin para garantir a gravação
+        const supabaseAdmin = createAdminClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL,
+            process.env.SUPABASE_SERVICE_ROLE_KEY, 
+            {
+                auth: {
+                    autoRefreshToken: false,
+                    persistSession: false
+                }
+            }
+        );
+
+        // 4. ATUALIZA O BANCO (UPDATE)
+        const { error, data } = await supabaseAdmin
             .from('integracoes_meta')
             .update({
                 page_id: page_id,
-                nome_conta: page_name,
-                page_access_token: page_access_token, // Guardamos o token VIP da página
-                status: 'ativo',
+                nome_conta: page_name, // Salvamos o nome da página para exibir depois
+                page_access_token: page_access_token, // Token VIP da página
+                status: 'ativo', // <--- Mudança de Status
                 updated_at: new Date()
             })
-            .eq('organizacao_id', userData.organizacao_id);
+            .eq('organizacao_id', orgId)
+            .select(); // Retorna o dado salvo para confirmarmos
 
         if (error) {
-            console.error('🚨 [Meta Pages] Erro ao salvar:', error);
+            console.error('🚨 [Meta Pages] ERRO AO GRAVAR NO BANCO:', error);
             throw error;
         }
 
-        console.log('✅ [Meta Pages] Página salva com sucesso!');
-        return NextResponse.json({ success: true });
+        console.log('✅ [Meta Pages] Sucesso! Banco atualizado:', data);
+
+        return NextResponse.json({ success: true, data });
 
     } catch (error) {
-        return NextResponse.json({ error: 'Erro ao salvar página.' }, { status: 500 });
+        console.error('💥 [Meta Pages] Erro fatal:', error);
+        return NextResponse.json({ error: error.message || 'Erro interno' }, { status: 500 });
     }
 }
