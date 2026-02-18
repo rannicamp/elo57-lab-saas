@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { createClient as createAdminClient } from '@supabase/supabase-js'; // Para salvar
 import { FacebookAdsApi, User, AdAccount } from 'facebook-nodejs-business-sdk';
 
 export async function GET(request) {
   try {
     const supabase = await createClient();
     
-    // 1. Autenticação Básica
+    // 1. Autenticação e Busca da Org
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Login necessário' }, { status: 401 });
 
@@ -17,7 +17,9 @@ export async function GET(request) {
       .eq('id', user.id)
       .single();
 
-    // 2. Pegar o Token Salvo
+    if (!userData?.organizacao_id) return NextResponse.json({ error: 'Org não encontrada' }, { status: 400 });
+
+    // 2. Pegar Token
     const { data: integracao } = await supabase
       .from('integracoes_meta')
       .select('access_token, ad_account_id')
@@ -32,23 +34,67 @@ export async function GET(request) {
     const api = FacebookAdsApi.init(integracao.access_token);
     const me = new User('me');
     
-    // 4. Buscar Contas de Anúncios
-    const accounts = await me.getAdAccounts(['name', 'account_id', 'currency', 'account_status', 'amount_spent']);
+    // Lista as contas de anúncio disponíveis (para o dropdown)
+    const accounts = await me.getAdAccounts(['name', 'account_id', 'currency', 'account_status']);
 
-    // Se já tiver uma conta salva, vamos tentar buscar as campanhas dela como teste
-    let campanhas = [];
+    // 4. SE JÁ TIVER CONTA SELECIONADA, BUSCA TUDO! 📦
+    let structure = {
+        campaigns: [],
+        adsets: [],
+        ads: []
+    };
+
     if (integracao.ad_account_id) {
         try {
-            // O SDK exige que o ID comece com "act_"
             const adAccountId = integracao.ad_account_id.startsWith('act_') 
                 ? integracao.ad_account_id 
                 : `act_${integracao.ad_account_id}`;
             
             const account = new AdAccount(adAccountId);
-            const campaignsData = await account.getCampaigns(['name', 'status', 'objective', 'daily_budget'], { limit: 5 });
-            campanhas = campaignsData.map(c => ({ name: c.name, status: c.status, objective: c.objective }));
+
+            // A. Busca Campanhas (Top 5)
+            const campaignsData = await account.getCampaigns(
+                ['name', 'status', 'objective', 'buying_type'], 
+                { limit: 5 }
+            );
+
+            // B. Busca Conjuntos de Anúncios (Top 5)
+            const adSetsData = await account.getAdSets(
+                ['name', 'status', 'daily_budget', 'billing_event', 'campaign_id'], 
+                { limit: 5 }
+            );
+
+            // C. Busca Anúncios e Criativos (Top 5) - Onde fica a imagem
+            const adsData = await account.getAds(
+                ['name', 'status', 'creative{thumbnail_url,title,body}', 'adset_id'], 
+                { limit: 5 }
+            );
+
+            // Formata os dados para o Front
+            structure.campaigns = campaignsData.map(c => ({
+                id: c.id,
+                name: c.name,
+                status: c.status,
+                objective: c.objective
+            }));
+
+            structure.adsets = adSetsData.map(a => ({
+                id: a.id,
+                name: a.name,
+                status: a.status,
+                budget: a.daily_budget ? `R$ ${(a.daily_budget / 100).toFixed(2)}` : 'N/A'
+            }));
+
+            structure.ads = adsData.map(ad => ({
+                id: ad.id,
+                name: ad.name,
+                status: ad.status,
+                title: ad.creative?.title || 'Sem título',
+                thumbnail: ad.creative?.thumbnail_url || null
+            }));
+
         } catch (e) {
-            console.error("Erro ao buscar campanhas:", e);
+            console.error("Erro ao buscar estrutura:", e);
         }
     }
 
@@ -61,27 +107,27 @@ export async function GET(request) {
             status: a.account_status === 1 ? 'Ativa' : 'Inativa/Outro'
         })),
         conta_atual: integracao.ad_account_id,
-        campanhas_teste: campanhas
+        data: structure // Aqui vão os dados detalhados
     });
 
   } catch (error) {
-    console.error('Erro AdAccounts:', error);
+    console.error('Erro Geral:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// POST: Salvar a Conta de Anúncios Escolhida
+// POST: Salvar Conta (Mantido igual, mas adicionei aqui para garantir o arquivo completo)
 export async function POST(request) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     
     try {
         const body = await request.json();
-        const { ad_account_id } = body; // Deve vir como "act_123456"
+        const { ad_account_id } = body; 
 
         const { data: userData } = await supabase.from('usuarios').select('organizacao_id').eq('id', user.id).single();
 
-        // MODO DEUS para garantir a gravação
+        // MODO DEUS (Admin)
         const supabaseAdmin = createAdminClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL,
             process.env.SUPABASE_SERVICE_ROLE_KEY,
