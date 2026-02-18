@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { createClient as createAdminClient } from '@supabase/supabase-js'; // Para salvar
-import { FacebookAdsApi, User, AdAccount } from 'facebook-nodejs-business-sdk';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { FacebookAdsApi, User } from 'facebook-nodejs-business-sdk';
 
+// GET: Lista as contas e informa qual está selecionada atualmente
 export async function GET(request) {
   try {
     const supabase = await createClient();
     
-    // 1. Autenticação e Busca da Org
+    // 1. Identifica o usuário e sua organização
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Login necessário' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
     const { data: userData } = await supabase
       .from('usuarios')
@@ -19,7 +20,7 @@ export async function GET(request) {
 
     if (!userData?.organizacao_id) return NextResponse.json({ error: 'Org não encontrada' }, { status: 400 });
 
-    // 2. Pegar Token
+    // 2. Busca o Token da Organização
     const { data: integracao } = await supabase
       .from('integracoes_meta')
       .select('access_token, ad_account_id')
@@ -27,107 +28,58 @@ export async function GET(request) {
       .single();
 
     if (!integracao?.access_token) {
-      return NextResponse.json({ error: 'Token não encontrado.' }, { status: 404 });
+      return NextResponse.json({ error: 'Integração não encontrada' }, { status: 404 });
     }
 
-    // 3. Inicializar SDK
+    // 3. Conecta no Facebook
     const api = FacebookAdsApi.init(integracao.access_token);
     const me = new User('me');
     
-    // Lista as contas de anúncio disponíveis (para o dropdown)
+    // 4. Busca as Contas de Anúncio
+    // Trazemos ID, Nome, Moeda e Status
     const accounts = await me.getAdAccounts(['name', 'account_id', 'currency', 'account_status']);
 
-    // 4. SE JÁ TIVER CONTA SELECIONADA, BUSCA TUDO! 📦
-    let structure = {
-        campaigns: [],
-        adsets: [],
-        ads: []
-    };
+    // 5. Retorna limpo para o Front-end
+    const formattedAccounts = accounts.map(acc => ({
+        id: `act_${acc.account_id}`, // Padronizamos com 'act_' para facilitar
+        name: acc.name,
+        currency: acc.currency,
+        status: acc.account_status === 1 ? 'Ativa' : 'Inativa', // 1 = Active
+        is_selected: `act_${acc.account_id}` === integracao.ad_account_id || `act_${acc.account_id}` === `act_${integracao.ad_account_id}`
+    }));
 
-    if (integracao.ad_account_id) {
-        try {
-            const adAccountId = integracao.ad_account_id.startsWith('act_') 
-                ? integracao.ad_account_id 
-                : `act_${integracao.ad_account_id}`;
-            
-            const account = new AdAccount(adAccountId);
-
-            // A. Busca Campanhas (Top 5)
-            const campaignsData = await account.getCampaigns(
-                ['name', 'status', 'objective', 'buying_type'], 
-                { limit: 5 }
-            );
-
-            // B. Busca Conjuntos de Anúncios (Top 5)
-            const adSetsData = await account.getAdSets(
-                ['name', 'status', 'daily_budget', 'billing_event', 'campaign_id'], 
-                { limit: 5 }
-            );
-
-            // C. Busca Anúncios e Criativos (Top 5) - Onde fica a imagem
-            const adsData = await account.getAds(
-                ['name', 'status', 'creative{thumbnail_url,title,body}', 'adset_id'], 
-                { limit: 5 }
-            );
-
-            // Formata os dados para o Front
-            structure.campaigns = campaignsData.map(c => ({
-                id: c.id,
-                name: c.name,
-                status: c.status,
-                objective: c.objective
-            }));
-
-            structure.adsets = adSetsData.map(a => ({
-                id: a.id,
-                name: a.name,
-                status: a.status,
-                budget: a.daily_budget ? `R$ ${(a.daily_budget / 100).toFixed(2)}` : 'N/A'
-            }));
-
-            structure.ads = adsData.map(ad => ({
-                id: ad.id,
-                name: ad.name,
-                status: ad.status,
-                title: ad.creative?.title || 'Sem título',
-                thumbnail: ad.creative?.thumbnail_url || null
-            }));
-
-        } catch (e) {
-            console.error("Erro ao buscar estrutura:", e);
-        }
-    }
-
-    return NextResponse.json({ 
-        ad_accounts: accounts.map(a => ({
-            name: a.name,
-            id: a.account_id,
-            id_formatado: `act_${a.account_id}`,
-            currency: a.currency,
-            status: a.account_status === 1 ? 'Ativa' : 'Inativa/Outro'
-        })),
-        conta_atual: integracao.ad_account_id,
-        data: structure // Aqui vão os dados detalhados
+    return NextResponse.json({
+        accounts: formattedAccounts,
+        selected_account_id: integracao.ad_account_id ? (integracao.ad_account_id.startsWith('act_') ? integracao.ad_account_id : `act_${integracao.ad_account_id}`) : null
     });
 
   } catch (error) {
-    console.error('Erro Geral:', error);
+    console.error('Erro ao buscar contas:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// POST: Salvar Conta (Mantido igual, mas adicionei aqui para garantir o arquivo completo)
+// POST: Salva a conta escolhida no banco
 export async function POST(request) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
     try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+
         const body = await request.json();
-        const { ad_account_id } = body; 
+        const { ad_account_id } = body; // Esperamos algo como "act_123456"
 
-        const { data: userData } = await supabase.from('usuarios').select('organizacao_id').eq('id', user.id).single();
+        if (!ad_account_id) return NextResponse.json({ error: 'ID da conta obrigatório' }, { status: 400 });
 
-        // MODO DEUS (Admin)
+        // Busca Org ID
+        const { data: userData } = await supabase
+            .from('usuarios')
+            .select('organizacao_id')
+            .eq('id', user.id)
+            .single();
+
+        // Usa ADMIN client para garantir a gravação (Update)
         const supabaseAdmin = createAdminClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL,
             process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -145,7 +97,9 @@ export async function POST(request) {
         if (error) throw error;
 
         return NextResponse.json({ success: true });
+
     } catch (error) {
+        console.error('Erro ao salvar conta:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }

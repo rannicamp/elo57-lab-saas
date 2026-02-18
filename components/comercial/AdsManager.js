@@ -1,86 +1,205 @@
-// components/comercial/AdsManager.js
 "use client";
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/contexts/AuthContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faSpinner, faLayerGroup, faBullhorn, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
+import { faMeta } from '@fortawesome/free-brands-svg-icons';
 import { toast } from 'sonner';
-import { RefreshCw, AlertTriangle, Layers, Target, Megaphone } from 'lucide-react';
 
-import KpiAnuncios from './KpiAnuncios';
+// Componentes do seu Layout
 import FiltroAnuncios from './FiltroAnuncios';
+import KpiAnuncios from './KpiAnuncios';
 import TabelaAnuncios from './TabelaAnuncios';
 
-// Função auxiliar de Fetch
-const fetchData = async (url) => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Falha na requisição");
+// --- API FETCHERS ---
+const fetchAdAccounts = async () => {
+    const res = await fetch('/api/meta/ad-accounts');
+    if (!res.ok) throw new Error('Erro contas');
     return res.json();
 };
 
-export default function AdsManager() {
-    const { user } = useAuth(); // Assume que temos user.organizacao_id aqui
-    const [filters, setFilters] = useState({ status: [], startDate: '', endDate: '' });
+const fetchCampaignsAndSets = async () => {
+    const res = await fetch('/api/meta/campaigns');
+    // Agora a API retorna array vazio em vez de erro, então podemos confiar
+    if (!res.ok) return { campaigns: [], adsets: [] };
+    return res.json();
+};
 
-    // 1. Busca Dados da Meta (API Unificada de Performance)
-    const { data: adsData, isLoading, isError, refetch } = useQuery({
-        queryKey: ['meta-ads-performance', user?.organizacao_id, filters],
-        queryFn: () => fetchData(`/api/meta/dados?orgId=${user?.organizacao_id}&start=${filters.startDate}&end=${filters.endDate}`),
-        enabled: !!user?.organizacao_id,
-        staleTime: 1000 * 60 * 5, // Cache de 5 minutos
+const fetchAdsData = async (filters) => {
+    const params = new URLSearchParams();
+    // Filtros básicos
+    if (filters.startDate) params.append('startDate', filters.startDate);
+    if (filters.endDate) params.append('endDate', filters.endDate);
+    if (filters.campaignIds?.length) params.append('campaignIds', filters.campaignIds.join(','));
+    if (filters.status?.length) params.append('status', filters.status.join(','));
+    
+    const res = await fetch(`/api/meta/ads?${params.toString()}`);
+    if (!res.ok) throw new Error('Erro ao buscar dados');
+    return res.json();
+};
+
+const saveSelectedAccount = async (adAccountId) => {
+    await fetch('/api/meta/ad-accounts', {
+        method: 'POST',
+        body: JSON.stringify({ ad_account_id: adAccountId })
+    });
+};
+
+export default function AdsManager() {
+    const queryClient = useQueryClient();
+
+    // Filtros Iniciais
+    const [filters, setFilters] = useState({
+        status: [], 
+        startDate: '',
+        endDate: '',
+        campaignIds: [],
+        adsetIds: [],
+        searchTerm: '' 
     });
 
-    if (isError) {
+    // 1. Busca Contas (Para o Dropdown)
+    const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
+        queryKey: ['meta-accounts'],
+        queryFn: fetchAdAccounts,
+        refetchOnWindowFocus: false
+    });
+
+    // 2. Busca Filtros (Para popular o componente FiltroAnuncios)
+    const { data: filterData } = useQuery({
+        queryKey: ['meta-filters', accountsData?.selected_account_id],
+        queryFn: fetchCampaignsAndSets,
+        enabled: !!accountsData?.selected_account_id,
+    });
+
+    // 3. Busca Anúncios (Dados da Tabela)
+    const { 
+        data: adsResponse, 
+        isLoading: isLoadingAds, 
+        isError,
+        refetch 
+    } = useQuery({
+        queryKey: ['meta-ads', accountsData?.selected_account_id, filters],
+        queryFn: () => fetchAdsData(filters),
+        enabled: !!accountsData?.selected_account_id,
+        keepPreviousData: true
+    });
+
+    // Mutação para trocar conta
+    const mutationChangeAccount = useMutation({
+        mutationFn: saveSelectedAccount,
+        onSuccess: () => {
+            toast.success('Conta alterada!');
+            queryClient.invalidateQueries(['meta-accounts']);
+            queryClient.invalidateQueries(['meta-filters']);
+            queryClient.invalidateQueries(['meta-ads']);
+            setFilters(prev => ({ ...prev, campaignIds: [], adsetIds: [] }));
+        }
+    });
+
+    // Loading Inicial
+    if (isLoadingAccounts) return (
+        <div className="flex justify-center items-center h-64 text-gray-500">
+            <FontAwesomeIcon icon={faSpinner} spin size="2x" className="mr-3"/> Carregando conexões...
+        </div>
+    );
+
+    // Sem contas conectadas
+    if (!accountsData?.accounts || accountsData.accounts.length === 0) {
         return (
-            <div className="p-8 border border-red-200 bg-red-50 rounded-2xl flex flex-col items-center justify-center text-red-600">
-                <AlertTriangle size={32} className="mb-2" />
-                <h3 className="font-bold">Erro ao carregar dados</h3>
-                <p className="text-sm mb-4">Verifique a conexão com a Meta nas configurações.</p>
-                <button onClick={() => refetch()} className="px-4 py-2 bg-white border border-red-200 rounded-lg hover:bg-red-100 transition-colors">
-                    Tentar Novamente
-                </button>
+            <div className="p-8 border border-dashed border-gray-300 rounded-lg text-center bg-gray-50">
+                <FontAwesomeIcon icon={faExclamationTriangle} className="text-yellow-500 text-3xl mb-3" />
+                <h3 className="font-bold text-gray-700">Nenhuma conta encontrada.</h3>
+                <a href="/configuracoes/integracoes" className="text-blue-600 hover:underline">Ir para Configurações</a>
             </div>
         );
     }
 
-    // Filtra os dados localmente se necessário (caso a API traga tudo)
-    // Se a API já filtrar, isso é redundante, mas seguro.
-    const filteredAds = adsData?.data || []; 
+    const ads = adsResponse?.data || [];
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500">
-            {/* Header da Seção */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-6">
+            {/* --- CABEÇALHO E SELEÇÃO DE CONTA --- */}
+            <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Megaphone className="text-blue-600" /> 
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <FontAwesomeIcon icon={faMeta} className="text-blue-600" /> 
                         Gestão de Tráfego
                     </h2>
-                    <p className="text-gray-500 text-sm mt-1">
-                        Acompanhe o desempenho das suas campanhas em tempo real.
-                    </p>
                 </div>
                 
-                {/* Status da Conexão (Opcional - Visual) */}
-                <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-full text-xs font-medium text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    API Meta Conectada
+                <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-gray-500 uppercase">Conta:</label>
+                    <select 
+                        className="bg-gray-50 border border-gray-300 text-sm rounded-md p-2 outline-none focus:ring-2 focus:ring-blue-500"
+                        value={accountsData.selected_account_id || ''}
+                        onChange={(e) => mutationChangeAccount.mutate(e.target.value)}
+                        disabled={mutationChangeAccount.isLoading}
+                    >
+                        <option value="" disabled>Selecione...</option>
+                        {accountsData.accounts.map(acc => (
+                            <option key={acc.id} value={acc.id}>{acc.name} ({acc.currency})</option>
+                        ))}
+                    </select>
                 </div>
             </div>
 
-            {/* KPIs Principais */}
-            <KpiAnuncios data={filteredAds} isLoading={isLoading} />
+            {/* --- ÁREA DE FILTROS --- */}
+            {/* Mantivemos seu componente original, só passando os dados novos */}
+            <FiltroAnuncios 
+                filters={filters} 
+                setFilters={setFilters} 
+                campaigns={filterData?.campaigns || []} 
+                adsets={filterData?.adsets || []}
+                refetch={refetch} 
+            />
 
-            {/* Filtros e Controles */}
-            <FiltroAnuncios filters={filters} setFilters={setFilters} refetch={refetch} />
-
-            {/* Tabela de Dados */}
-            {isLoading ? (
-                <div className="space-y-4">
-                    {[1, 2, 3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}
+            {/* --- CONTEÚDO (KPIS E TABELA) --- */}
+            {!accountsData.selected_account_id ? (
+                <div className="text-center py-10 bg-yellow-50 text-yellow-800 rounded">
+                    Selecione uma conta de anúncios acima para visualizar os dados.
                 </div>
             ) : (
-                <TabelaAnuncios ads={filteredAds} />
+                <>
+                    {/* Componente KPI Original */}
+                    <KpiAnuncios data={ads} isLoading={isLoadingAds} />
+
+                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                        {/* Header da Tabela */}
+                        <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+                            <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                                <FontAwesomeIcon icon={faLayerGroup} className="text-gray-400" />
+                                Lista de Anúncios
+                            </h3>
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                {ads.length} criativos
+                            </span>
+                        </div>
+                        
+                        {/* Estados de Loading/Erro/Vazio */}
+                        {isLoadingAds ? (
+                            <div className="p-20 text-center text-gray-400">
+                                <FontAwesomeIcon icon={faSpinner} spin className="text-3xl mb-2" />
+                                <p>Carregando dados do Facebook...</p>
+                            </div>
+                        ) : isError ? (
+                            <div className="p-10 text-center text-red-500">
+                                <FontAwesomeIcon icon={faExclamationTriangle} className="mb-2" />
+                                <p>Erro ao carregar anúncios. Verifique sua conexão.</p>
+                                <button onClick={() => refetch()} className="text-sm underline mt-2">Tentar novamente</button>
+                            </div>
+                        ) : ads.length === 0 ? (
+                            <div className="p-10 text-center text-gray-500">
+                                <FontAwesomeIcon icon={faBullhorn} className="text-3xl mb-2 text-gray-300" />
+                                <p>Nenhum anúncio encontrado com os filtros atuais.</p>
+                            </div>
+                        ) : (
+                            /* Tabela Original - Passamos 'initialAds' ou 'data' conforme seu componente espera */
+                            <TabelaAnuncios initialAds={ads} /> 
+                        )}
+                    </div>
+                </>
             )}
         </div>
     );
