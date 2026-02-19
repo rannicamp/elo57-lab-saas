@@ -6,8 +6,6 @@ import { faImage, faSort, faSortUp, faSortDown } from '@fortawesome/free-solid-s
 
 const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 const formatNumber = (val) => new Intl.NumberFormat('pt-BR').format(val || 0);
-
-// Nova função para formatar a frequência com 2 casas decimais
 const formatDecimal = (val) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val || 0);
 
 const StatusBadge = ({ status }) => {
@@ -22,6 +20,35 @@ const StatusBadge = ({ status }) => {
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`}></span>
             {style.label}
+        </span>
+    );
+};
+
+// =========================================================================
+// MÁGICA DO IMOBILIÁRIO: Regras de Cor e Tooltip para Frequência
+// =========================================================================
+const FrequenciaBadge = ({ frequencia }) => {
+    const val = Number(frequencia) || 0;
+    let style = { bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200', title: 'Sem dados' };
+    
+    if (val > 0 && val < 1.8) {
+        style = { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', title: '🔴 Baixa Lembrança: O imóvel é uma compra complexa. Se a pessoa viu apenas 1 vez, ela provavelmente não fixou o nome do empreendimento.' };
+    } else if (val >= 1.8 && val < 2.5) {
+        style = { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-300', title: '🟡 Fase de Aquecimento: Você está começando a ser notado, mas ainda corre o risco de ser ignorado.' };
+    } else if (val >= 2.5 && val <= 4.5) {
+        style = { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-300', title: '🟢 Ponto de Conversão (Ideal): A pessoa viu o anúncio o suficiente para sentir confiança e clicar para saber mais.' };
+    } else if (val > 4.5 && val <= 6.0) {
+        style = { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-300', title: '🟡 Início de Saturação: O público já viu seu anúncio várias vezes. Se ele não virou lead até agora, talvez o criativo esteja cansativo.' };
+    } else if (val > 6.0) {
+        style = { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', title: '🔴 Fadiga de Anúncio: Você está gastando dinheiro para mostrar a mesma imagem para quem já decidiu não clicar. Hora de trocar.' };
+    }
+
+    return (
+        <span 
+            title={style.title}
+            className={`inline-block px-2 py-1 rounded text-xs font-bold border cursor-help transition-colors ${style.bg} ${style.text} ${style.border}`}
+        >
+            {formatDecimal(val)}
         </span>
     );
 };
@@ -118,7 +145,6 @@ export default function TabelaAnuncios({ ads, filters }) {
                             Impressões {renderSortIcon('impressions')}
                         </th>
 
-                        {/* NOVA COLUNA: Frequência */}
                         <th 
                             className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
                             onClick={() => handleSort('frequencia')}
@@ -180,11 +206,9 @@ export default function TabelaAnuncios({ ads, filters }) {
                                 {formatNumber(ad.impressions)}
                             </td>
 
-                            {/* EXIBIÇÃO DA FREQUÊNCIA COM ALERTA VISUAL */}
                             <td className="px-6 py-4 whitespace-nowrap text-center">
-                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold border ${Number(ad.frequencia) > 3 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                                    {formatDecimal(ad.frequencia)}
-                                </span>
+                                {/* O NOSSO NOVO COMPONENTE ESTÁ AQUI */}
+                                <FrequenciaBadge frequencia={ad.frequencia} />
                             </td>
                             
                             <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-600">
