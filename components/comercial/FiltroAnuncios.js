@@ -1,4 +1,3 @@
-// components/comercial/FiltroAnuncios.js
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
@@ -14,6 +13,7 @@ const initialFilterState = {
     endDate: '',
     campaignIds: [],
     adsetIds: [],
+    searchTerm: ''
 };
 
 export default function FiltroAnuncios({ 
@@ -21,7 +21,7 @@ export default function FiltroAnuncios({
     setFilters, 
     campaigns, 
     adsets,
-    refetch // Conectamos a propriedade de atualização do React Query aqui!
+    refetch 
 }) {
     const [savedFilters, setSavedFilters] = useState([]);
     const [newFilterName, setNewFilterName] = useState('');
@@ -70,7 +70,6 @@ export default function FiltroAnuncios({
     };
 
     const clearFilters = () => {
-        // Preserva o termo de busca atual, zera o resto
         setFilters(prev => ({ ...initialFilterState, searchTerm: prev.searchTerm }));
         setActivePeriodFilter('');
     };
@@ -115,12 +114,24 @@ export default function FiltroAnuncios({
         { id: 'ARCHIVED', nome: 'Arquivado' },
     ];
 
+    // =========================================================================
+    // O TRADUTOR MÁGICO: Transforma 'name' (do Facebook) em 'nome' (para o Dropdown)
+    // =========================================================================
+    const campanhasFormatadas = (campaigns || []).map(c => ({
+        id: c.id,
+        nome: c.name || c.nome || 'Sem nome'
+    }));
+
+    const conjuntosFormatados = (adsets || []).map(a => ({
+        id: a.id,
+        nome: a.name || a.nome || 'Sem nome'
+    }));
+
     return (
         <div className="bg-gray-50 border-b border-gray-200 p-4 animate-slide-down shadow-inner rounded-lg mb-4">
             <div className="flex justify-between items-start mb-4">
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-2">Filtros Avançados</h3>
                 
-                {/* Menu de Gerenciamento de Filtros */}
                 <div className="relative" ref={filterMenuRef}>
                     <button onClick={() => setIsFilterMenuOpen(prev => !prev)} className="text-gray-500 hover:text-blue-600 transition-colors p-2 rounded-md hover:bg-white border border-transparent hover:border-gray-200" title="Gerenciar Filtros Salvos">
                         <FontAwesomeIcon icon={faEllipsisV} />
@@ -164,14 +175,16 @@ export default function FiltroAnuncios({
                 />
                 <MultiSelectDropdown 
                     label="Campanhas" 
-                    options={campaigns || []} 
+                    // Usando as nossas listas formatadas com 'nome'
+                    options={campanhasFormatadas} 
                     selectedIds={filters.campaignIds} 
                     onChange={(selected) => handleFilterChange('campaignIds', selected)} 
                     placeholder="Todas as Campanhas"
                 />
                 <MultiSelectDropdown 
                     label="Conjuntos de Anúncios" 
-                    options={adsets || []} 
+                    // Usando as nossas listas formatadas com 'nome'
+                    options={conjuntosFormatados} 
                     selectedIds={filters.adsetIds} 
                     onChange={(selected) => handleFilterChange('adsetIds', selected)} 
                     placeholder="Todos os Conjuntos"
@@ -198,13 +211,11 @@ export default function FiltroAnuncios({
             </div>
 
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 pt-4 mt-4 border-t border-gray-200">
-                {/* Filtros Favoritos (Atalhos) */}
                 <div className="flex flex-wrap gap-2 items-center flex-1">
                     {savedFilters.filter(f => f.isFavorite).length > 0 ? (
                         <>
                             <span className="text-xs font-bold text-gray-400 uppercase mr-2"><FontAwesomeIcon icon={faStarSolid} /> Favoritos:</span>
                             {savedFilters.filter(f => f.isFavorite).map((f, i) => {
-                                // Pequena correção de segurança visual para não quebrar a tela
                                 const isActive = filters.status === f.settings.status && filters.campaignIds === f.settings.campaignIds; 
                                 return (
                                     <button key={i} onClick={() => handleLoadFilter(f.settings)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${isActive ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
@@ -220,7 +231,6 @@ export default function FiltroAnuncios({
                     <button onClick={clearFilters} className="text-xs bg-white border border-gray-300 text-gray-600 hover:text-red-600 hover:border-red-300 hover:bg-red-50 px-4 py-2 rounded-md flex items-center gap-2 font-semibold transition-all shadow-sm">
                         <FontAwesomeIcon icon={faTimes} /> Limpar Filtros
                     </button>
-                    {/* AQUI ESTÁ A NOSSA MÁGICA: O botão de atualizar o cache/Meta */}
                     <button onClick={() => { if(refetch) refetch(); toast.info('Buscando dados recentes...'); }} className="text-xs bg-white border border-gray-300 text-blue-600 hover:text-blue-700 hover:border-blue-300 hover:bg-blue-50 px-4 py-2 rounded-md flex items-center gap-2 font-semibold transition-all shadow-sm">
                         <FontAwesomeIcon icon={faSyncAlt} /> Atualizar Meta
                     </button>
