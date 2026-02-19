@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faImage, faSort, faSortUp, faSortDown } from '@fortawesome/free-solid-svg-icons';
+import { faImage, faSort, faSortUp, faSortDown, faPowerOff, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
 const formatNumber = (val) => new Intl.NumberFormat('pt-BR').format(val || 0);
@@ -24,9 +26,6 @@ const StatusBadge = ({ status }) => {
     );
 };
 
-// =========================================================================
-// MÁGICA DO IMOBILIÁRIO: Regras de Cor e Tooltip para Frequência
-// =========================================================================
 const FrequenciaBadge = ({ frequencia }) => {
     const val = Number(frequencia) || 0;
     let style = { bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200', title: 'Sem dados' };
@@ -54,7 +53,49 @@ const FrequenciaBadge = ({ frequencia }) => {
 };
 
 export default function TabelaAnuncios({ ads, filters }) {
+    const queryClient = useQueryClient();
     const [sortConfig, setSortConfig] = useState({ key: 'spend', direction: 'desc' });
+    const [loadingAdId, setLoadingAdId] = useState(null); // Para mostrar o spinner no botão exato que foi clicado
+
+    // =========================================================================
+    // A MÁGICA DA MUTAÇÃO: Atualizar Status
+    // =========================================================================
+    const mutationToggleStatus = useMutation({
+        mutationFn: async ({ adId, newStatus }) => {
+            const res = await fetch('/api/meta/ads/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adId, status: newStatus }),
+            });
+            if (!res.ok) throw new Error('Erro ao atualizar no Meta');
+            return res.json();
+        },
+        onMutate: ({ adId }) => {
+            setLoadingAdId(adId);
+        },
+        onSuccess: (data, variables) => {
+            toast.success(`Anúncio ${variables.newStatus === 'ACTIVE' ? 'ativado' : 'pausado'} com sucesso!`);
+            // Isso avisa ao motor principal para buscar os dados atualizados!
+            queryClient.invalidateQueries({ queryKey: ['meta-ads'] });
+        },
+        onError: () => {
+            toast.error('Erro ao tentar mudar o status do anúncio. Verifique sua conexão.');
+        },
+        onSettled: () => {
+            setLoadingAdId(null);
+        }
+    });
+
+    const handleToggleStatus = (ad) => {
+        // Se estiver arquivado, nós não deixamos mexer para evitar erros no Meta
+        if (ad.status === 'ARCHIVED') {
+            toast.warning('Anúncios arquivados não podem ser alterados.');
+            return;
+        }
+        
+        const newStatus = ad.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+        mutationToggleStatus.mutate({ adId: ad.id, newStatus });
+    };
 
     const filteredAds = useMemo(() => {
         if (!ads) return [];
@@ -122,54 +163,33 @@ export default function TabelaAnuncios({ ads, filters }) {
                 <thead className="bg-gray-50 select-none">
                     <tr>
                         <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Criativo / Anúncio</th>
-                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status / Ação</th>
                         
-                        <th 
-                            className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('spend')}
-                        >
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('spend')}>
                             Gasto {renderSortIcon('spend')}
                         </th>
                         
-                        <th 
-                            className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('reach')}
-                        >
+                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('reach')}>
                             Alcance {renderSortIcon('reach')}
                         </th>
 
-                        <th 
-                            className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('impressions')}
-                        >
+                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('impressions')}>
                             Impressões {renderSortIcon('impressions')}
                         </th>
 
-                        <th 
-                            className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('frequencia')}
-                        >
+                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('frequencia')}>
                             Frequência {renderSortIcon('frequencia')}
                         </th>
 
-                        <th 
-                            className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('clicks')}
-                        >
+                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('clicks')}>
                             Cliques {renderSortIcon('clicks')}
                         </th>
                         
-                        <th 
-                            className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('leads')}
-                        >
+                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('leads')}>
                             Leads {renderSortIcon('leads')}
                         </th>
                         
-                        <th 
-                            className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-                            onClick={() => handleSort('cost_per_lead')}
-                        >
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('cost_per_lead')}>
                             CPL {renderSortIcon('cost_per_lead')}
                         </th>
                     </tr>
@@ -192,7 +212,31 @@ export default function TabelaAnuncios({ ads, filters }) {
                                     </div>
                                 </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap"><StatusBadge status={ad.status} /></td>
+                            
+                            {/* STATUS E BOTÃO DE LIGAR/DESLIGAR */}
+                            <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center gap-2">
+                                    <StatusBadge status={ad.status} />
+                                    {ad.status !== 'ARCHIVED' && (
+                                        <button 
+                                            onClick={() => handleToggleStatus(ad)}
+                                            disabled={loadingAdId === ad.id}
+                                            title={ad.status === 'ACTIVE' ? 'Pausar Anúncio' : 'Ativar Anúncio'}
+                                            className={`p-1.5 rounded-md transition-colors ${
+                                                ad.status === 'ACTIVE' 
+                                                ? 'text-red-500 hover:bg-red-50' 
+                                                : 'text-green-500 hover:bg-green-50'
+                                            } disabled:opacity-50`}
+                                        >
+                                            {loadingAdId === ad.id ? (
+                                                <FontAwesomeIcon icon={faSpinner} spin />
+                                            ) : (
+                                                <FontAwesomeIcon icon={faPowerOff} />
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
+                            </td>
                             
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-700">
                                 {formatCurrency(ad.spend)}
@@ -207,7 +251,6 @@ export default function TabelaAnuncios({ ads, filters }) {
                             </td>
 
                             <td className="px-6 py-4 whitespace-nowrap text-center">
-                                {/* O NOSSO NOVO COMPONENTE ESTÁ AQUI */}
                                 <FrequenciaBadge frequencia={ad.frequencia} />
                             </td>
                             
