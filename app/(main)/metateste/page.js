@@ -10,15 +10,46 @@ export default function MetaTestePage() {
     carregarDados();
   }, []);
 
-  const carregarDados = () => {
+  const carregarDados = async () => {
     setLoading(true);
-    fetch('/api/meta/ad-accounts')
-      .then(res => res.json())
-      .then(res => {
-        if(res.error) alert(res.error);
-        else setData(res);
-      })
-      .finally(() => setLoading(false));
+    try {
+        // 1. Busca as Contas (Nova API)
+        const resContas = await fetch('/api/meta/ad-accounts');
+        const dataContas = await resContas.json();
+
+        if (dataContas.error) throw new Error(dataContas.error);
+
+        // Monta o "esqueleto" de dados que a tela de teste espera
+        let currentState = {
+            // A nova API chama o ID com 'act_' apenas de 'id', então mapeamos para 'id_formatado'
+            ad_accounts: (dataContas.accounts || []).map(acc => ({ ...acc, id_formatado: acc.id })),
+            conta_atual: dataContas.selected_account_id,
+            data: { campaigns: [], adsets: [], ads: [] }
+        };
+
+        // 2. Se tiver conta selecionada, busca as Campanhas e Anúncios das outras APIs
+        if (dataContas.selected_account_id) {
+            const [resCampaigns, resAds] = await Promise.all([
+                fetch('/api/meta/campaigns'),
+                fetch('/api/meta/ads')
+            ]);
+
+            if (resCampaigns.ok && resAds.ok) {
+                const campaignsData = await resCampaigns.json();
+                const adsData = await resAds.json();
+
+                currentState.data.campaigns = campaignsData.campaigns || [];
+                currentState.data.adsets = campaignsData.adsets || [];
+                currentState.data.ads = adsData.data || [];
+            }
+        }
+
+        setData(currentState);
+    } catch (err) {
+        alert(err.message || 'Erro ao buscar dados');
+    } finally {
+        setLoading(false);
+    }
   };
 
   const salvarConta = async (id_formatado) => {
@@ -26,6 +57,7 @@ export default function MetaTestePage() {
     
     const res = await fetch('/api/meta/ad-accounts', {
         method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, // <-- Isso previne erros no backend
         body: JSON.stringify({ ad_account_id: id_formatado })
     });
     

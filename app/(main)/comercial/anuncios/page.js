@@ -1,4 +1,3 @@
-// app/(main)/comercial/anuncios/page.js
 import AdsManager from '@/components/comercial/AdsManager';
 
 export const metadata = {
