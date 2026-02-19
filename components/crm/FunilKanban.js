@@ -9,8 +9,6 @@ import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { enviarNotificacao } from '@/utils/notificacoes';
 import { useAuth } from '@/contexts/AuthContext';
-
-// --- IMPORTAÇÃO DO CAPI (NOVO) ---
 import { verificarDisparoCapi } from '@/app/(main)/crm/capiActions';
 
 const AddColumn = ({ onCreate }) => {
@@ -57,29 +55,12 @@ const AddColumn = ({ onCreate }) => {
     );
 };
 
-
 export default function FunilKanban({
-    contatos,
-    statusColumns,
-    onStatusChange,
-    onCreateColumn,
-    onAddContact,
-    onEditColumn,
-    onDeleteColumn,
-    onReorderColumns,
-    onOpenNotesModal,
-    availableProducts,
-    onAssociateProduct,
-    onDissociateProduct,
-    onAssociateCorretor,
-    onCardClick,
-    onAddActivity,
-    sorting,
-    setSorting,
-    userRole,
-    onDeleteAllCardsInColumn,
-    onDeleteCard,
-    onStartWhatsApp
+    contatos, statusColumns, onStatusChange, onCreateColumn, onAddContact,
+    onEditColumn, onDeleteColumn, onReorderColumns, onOpenNotesModal,
+    availableProducts, onAssociateProduct, onDissociateProduct,
+    onAssociateCorretor, onCardClick, onAddActivity, sorting, setSorting,
+    userRole, onDeleteAllCardsInColumn, onDeleteCard, onStartWhatsApp
 }) {
     const { user } = useAuth();
     const [editingColumnId, setEditingColumnId] = useState(null);
@@ -88,7 +69,6 @@ export default function FunilKanban({
     const [openSortMenu, setOpenSortMenu] = useState(null);
     const sortMenuRef = useRef(null);
     const [deletingColumnId, setDeletingColumnId] = useState(null);
-    
     const [dragOverColumnId, setDragOverColumnId] = useState(null);
     
     const scrollContainerRef = useRef(null);
@@ -96,7 +76,10 @@ export default function FunilKanban({
     const [startX, setStartX] = useState(0);
     const [scrollLeft, setScrollLeft] = useState(0);
 
-    const protectedColumns = ['excluir', 'vendido', 'perdido'];
+    // =========================================================================
+    // A MÁGICA DA PROTEÇÃO: Ninguém pode mexer nas colunas do Sistema
+    // =========================================================================
+    const protectedColumns = ['entrada', 'vendido', 'perdido', 'excluir'];
 
     useEffect(() => {
         function handleClickOutside(event) {
@@ -105,9 +88,7 @@ export default function FunilKanban({
             }
         }
         document.addEventListener("mousedown", handleClickOutside);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-        };
+        return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [sortMenuRef]);
 
     const handleMouseDown = (e) => {
@@ -137,11 +118,8 @@ export default function FunilKanban({
     const handleDragStart = (e, item, type) => {
         e.stopPropagation();
         setDraggedItem({ item, type });
-        if (type === 'card') {
-            e.dataTransfer.setData("contatoNoFunilId", item.id);
-        } else if (type === 'column') {
-            e.dataTransfer.setData("draggedColumnId", item.id);
-        }
+        if (type === 'card') e.dataTransfer.setData("contatoNoFunilId", item.id);
+        else if (type === 'column') e.dataTransfer.setData("draggedColumnId", item.id);
     };
 
     const handleDragOver = (e, colunaId) => { 
@@ -163,8 +141,14 @@ export default function FunilKanban({
 
         if (!draggedItem) return;
         
-        // Lógica de Colunas
+        // Bloqueia a ordenação manual (arrastar coluna) de colunas protegidas
         if (draggedItem.type === 'column' && draggedItem.item.id !== targetColumn.id) {
+            const isProtected = protectedColumns.includes(draggedItem.item.nome.trim().toLowerCase());
+            if (isProtected) {
+                toast.error("Colunas do sistema não podem mudar de posição.");
+                return;
+            }
+
             const draggedIndex = statusColumns.findIndex(col => col.id === draggedItem.item.id);
             const targetIndex = statusColumns.findIndex(col => col.id === targetColumn.id);
             if (draggedIndex === -1 || targetIndex === -1) return;
@@ -175,16 +159,10 @@ export default function FunilKanban({
             onReorderColumns(reorderedWithNewOrder);
         }
         
-        // Lógica de Cards (Leads)
         if (draggedItem.type === 'card' && draggedItem.item.coluna_id !== targetColumn.id) {
-            // 1. Atualiza visualmente e no banco (Função Original)
             await onStatusChange(draggedItem.item.id, targetColumn.id);
-
-            // 2. --- DISPARO DO CAPI (Meta/Facebook) ---
-            // Chamamos a Server Action em background (sem await) para não travar a UI
             verificarDisparoCapi(draggedItem.item.id, targetColumn.id);
             
-            // 3. Notificação Interna do Sistema
             const nomeContato = draggedItem.item.contatos?.nome || draggedItem.item.contatos?.razao_social || 'Contato';
             const nomeOrigem = statusColumns.find(c => c.id === draggedItem.item.coluna_id)?.nome || '?';
             
@@ -224,7 +202,6 @@ export default function FunilKanban({
     
     const handleMoveCardFromDropdown = (contatoNoFunilId, newColumnId) => { 
         onStatusChange(contatoNoFunilId, newColumnId);
-        // Também aciona o CAPI pelo dropdown
         verificarDisparoCapi(contatoNoFunilId, newColumnId);
     };
     
@@ -294,75 +271,88 @@ export default function FunilKanban({
             onMouseUp={handleMouseLeaveOrUp}
             onMouseMove={handleMouseMove}
         >
-            {statusColumns.map((coluna) => (
-                <div 
-                    key={coluna.id} 
-                    className={`w-80 flex-shrink-0 bg-white rounded-lg shadow-sm flex flex-col kanban-card transition-colors duration-200 ${dragOverColumnId === coluna.id ? 'bg-blue-50 border-2 border-blue-400' : ''}`} 
-                    onDragOver={(e) => handleDragOver(e, coluna.id)} 
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, coluna)}
-                >
-                    <div className="p-3 text-sm font-semibold text-gray-700 border-b bg-gray-50 rounded-t-lg flex justify-between items-center cursor-move" draggable onDragStart={(e) => handleDragStart(e, coluna, 'column')} onDragEnd={() => setDraggedItem(null)}>
-                        {editingColumnId === coluna.id ? (
-                            <div className="flex w-full items-center gap-2">
-                                <input type="text" value={editedColumnName} onChange={(e) => setEditedColumnName(e.target.value)} className="flex-grow p-1 border rounded text-sm" autoFocus onKeyPress={(e) => { if (e.key === 'Enter') handleSaveEdit(coluna.id); }} />
-                                <button onClick={() => handleSaveEdit(coluna.id)} className="text-blue-600 hover:text-blue-800">Salvar</button>
-                                <button onClick={handleCancelEdit} className="text-gray-600 hover:text-gray-800">Cancelar</button>
-                            </div>
-                        ) : (
-                            <>
-                                <h3 className="flex-grow">{coluna.nome} ({contatosPorColuna[coluna.id]?.length || 0})</h3>
-                                <div className="flex items-center gap-2">
-                                    {userRole === 'Proprietário' && coluna.nome.trim().toLowerCase() === 'excluir' && (contatosPorColuna[coluna.id]?.length || 0) > 0 && (
-                                        <button onClick={() => handleDeleteAll(coluna.id, contatosPorColuna[coluna.id].length)} disabled={deletingColumnId === coluna.id} className="text-red-500 hover:text-red-700 transition-colors" title={`Excluir todos os ${contatosPorColuna[coluna.id].length} cards`}>
-                                            <FontAwesomeIcon icon={deletingColumnId === coluna.id ? faSpinner : faTrash} spin={deletingColumnId === coluna.id} size="sm" />
-                                        </button>
-                                    )}
-                                    <div className="relative">
-                                        <button onClick={() => setOpenSortMenu(openSortMenu === coluna.id ? null : coluna.id)} className="text-gray-500 hover:text-blue-600 transition-colors" title="Ordenar cards"><FontAwesomeIcon icon={faSort} size="sm" /></button>
-                                        {openSortMenu === coluna.id && (
-                                            <div ref={sortMenuRef} className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-md shadow-lg z-20">
-                                                <p className="p-2 font-semibold text-xs text-gray-500 border-b">Ordenar por:</p>
-                                                {sortOptions.map(option => (<button key={option.value} onClick={() => handleSortChange(coluna.id, option.value)} className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100">{option.label}</button>))}
-                                            </div>
+            {statusColumns.map((coluna) => {
+                // Verifica se a coluna atual é protegida pelo sistema
+                const isProtected = protectedColumns.includes(coluna.nome.trim().toLowerCase());
+
+                return (
+                    <div 
+                        key={coluna.id} 
+                        className={`w-80 flex-shrink-0 bg-white rounded-lg shadow-sm flex flex-col kanban-card transition-colors duration-200 ${dragOverColumnId === coluna.id ? 'bg-blue-50 border-2 border-blue-400' : ''}`} 
+                        onDragOver={(e) => handleDragOver(e, coluna.id)} 
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, coluna)}
+                    >
+                        <div className="p-3 text-sm font-semibold text-gray-700 border-b bg-gray-50 rounded-t-lg flex justify-between items-center cursor-move" draggable={!isProtected} onDragStart={(e) => handleDragStart(e, coluna, 'column')} onDragEnd={() => setDraggedItem(null)}>
+                            {editingColumnId === coluna.id ? (
+                                <div className="flex w-full items-center gap-2">
+                                    <input type="text" value={editedColumnName} onChange={(e) => setEditedColumnName(e.target.value)} className="flex-grow p-1 border rounded text-sm" autoFocus onKeyPress={(e) => { if (e.key === 'Enter') handleSaveEdit(coluna.id); }} />
+                                    <button onClick={() => handleSaveEdit(coluna.id)} className="text-blue-600 hover:text-blue-800">Salvar</button>
+                                    <button onClick={handleCancelEdit} className="text-gray-600 hover:text-gray-800">Cancelar</button>
+                                </div>
+                            ) : (
+                                <>
+                                    <h3 className="flex-grow flex items-center gap-2">
+                                        {coluna.nome} ({contatosPorColuna[coluna.id]?.length || 0})
+                                        {isProtected && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full uppercase">Sistema</span>}
+                                    </h3>
+                                    
+                                    <div className="flex items-center gap-2">
+                                        {userRole === 'Proprietário' && coluna.nome.trim().toLowerCase() === 'excluir' && (contatosPorColuna[coluna.id]?.length || 0) > 0 && (
+                                            <button onClick={() => handleDeleteAll(coluna.id, contatosPorColuna[coluna.id].length)} disabled={deletingColumnId === coluna.id} className="text-red-500 hover:text-red-700 transition-colors" title={`Excluir todos os ${contatosPorColuna[coluna.id].length} cards`}>
+                                                <FontAwesomeIcon icon={deletingColumnId === coluna.id ? faSpinner : faTrash} spin={deletingColumnId === coluna.id} size="sm" />
+                                            </button>
+                                        )}
+                                        <div className="relative">
+                                            <button onClick={() => setOpenSortMenu(openSortMenu === coluna.id ? null : coluna.id)} className="text-gray-500 hover:text-blue-600 transition-colors" title="Ordenar cards"><FontAwesomeIcon icon={faSort} size="sm" /></button>
+                                            {openSortMenu === coluna.id && (
+                                                <div ref={sortMenuRef} className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-md shadow-lg z-20">
+                                                    <p className="p-2 font-semibold text-xs text-gray-500 border-b">Ordenar por:</p>
+                                                    {sortOptions.map(option => (<button key={option.value} onClick={() => handleSortChange(coluna.id, option.value)} className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100">{option.label}</button>))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        {/* Esconde os botões de Editar e Lixeira se for coluna do Sistema */}
+                                        {!isProtected && (
+                                            <>
+                                                <button onClick={() => handleEditClick(coluna)} className="text-gray-500 hover:text-blue-600 transition-colors" title="Editar etapa"><FontAwesomeIcon icon={faEdit} size="sm" /></button>
+                                                <button onClick={() => handleDeleteClick(coluna.id, coluna.nome)} className="text-gray-500 hover:text-red-600 transition-colors" title="Excluir etapa"><FontAwesomeIcon icon={faTrash} size="sm" /></button>
+                                            </>
                                         )}
                                     </div>
-                                    <button onClick={() => handleEditClick(coluna)} className="text-gray-500 hover:text-blue-600 transition-colors" title="Editar etapa"><FontAwesomeIcon icon={faEdit} size="sm" /></button>
-                                    {!protectedColumns.includes(coluna.nome.trim().toLowerCase()) && (
-                                        <button onClick={() => handleDeleteClick(coluna.id, coluna.nome)} className="text-gray-500 hover:text-red-600 transition-colors" title="Excluir etapa"><FontAwesomeIcon icon={faTrash} size="sm" /></button>
-                                    )}
-                                </div>
-                            </>
-                        )}
+                                </>
+                            )}
+                        </div>
+                        <div className="p-2 space-y-3 overflow-y-auto flex-1 bg-gray-100/50">
+                            {(contatosPorColuna[coluna.id] || []).map((contato) => (
+                                <ContatoCardCRM
+                                    key={contato.id}
+                                    funilEntry={contato}
+                                    onDragStart={(e) => handleDragStart(e, contato, 'card')}
+                                    onDragEnd={() => setDraggedItem(null)}
+                                    allColumns={statusColumns}
+                                    onMoveToColumn={handleMoveCardFromDropdown}
+                                    onOpenNotesModal={onOpenNotesModal}
+                                    availableProducts={availableProducts}
+                                    onAssociateProduct={onAssociateProduct}
+                                    onDissociateProduct={onDissociateProduct}
+                                    onAssociateCorretor={onAssociateCorretor}
+                                    onCardClick={onCardClick}
+                                    onAddActivity={onAddActivity}
+                                    onDeleteCard={onDeleteCard}
+                                    onStartWhatsApp={onStartWhatsApp}
+                                />
+                            ))}
+                        </div>
+                        <div className="p-2 border-t mt-auto">
+                            <button onClick={() => onAddContact(coluna.id)} className="w-full text-center text-sm p-2 rounded-md text-gray-600 hover:bg-gray-300 hover:text-gray-800 transition-colors">
+                                <FontAwesomeIcon icon={faPlus} className="mr-2" /> Adicionar Contato
+                            </button>
+                        </div>
                     </div>
-                    <div className="p-2 space-y-3 overflow-y-auto flex-1 bg-gray-100/50">
-                        {(contatosPorColuna[coluna.id] || []).map((contato) => (
-                            <ContatoCardCRM
-                                key={contato.id}
-                                funilEntry={contato}
-                                onDragStart={(e) => handleDragStart(e, contato, 'card')}
-                                onDragEnd={() => setDraggedItem(null)}
-                                allColumns={statusColumns}
-                                onMoveToColumn={handleMoveCardFromDropdown}
-                                onOpenNotesModal={onOpenNotesModal}
-                                availableProducts={availableProducts}
-                                onAssociateProduct={onAssociateProduct}
-                                onDissociateProduct={onDissociateProduct}
-                                onAssociateCorretor={onAssociateCorretor}
-                                onCardClick={onCardClick}
-                                onAddActivity={onAddActivity}
-                                onDeleteCard={onDeleteCard}
-                                onStartWhatsApp={onStartWhatsApp}
-                            />
-                        ))}
-                    </div>
-                    <div className="p-2 border-t mt-auto">
-                        <button onClick={() => onAddContact(coluna.id)} className="w-full text-center text-sm p-2 rounded-md text-gray-600 hover:bg-gray-300 hover:text-gray-800 transition-colors">
-                            <FontAwesomeIcon icon={faPlus} className="mr-2" /> Adicionar Contato
-                        </button>
-                    </div>
-                </div>
-            ))}
+                );
+            })}
             <AddColumn onCreate={onCreateColumn} />
         </div>
     );
