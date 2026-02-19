@@ -1,19 +1,36 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner, faLayerGroup, faBullhorn, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faLayerGroup, faExclamationTriangle, faSearch, faFilter } from '@fortawesome/free-solid-svg-icons';
 import { faMeta } from '@fortawesome/free-brands-svg-icons';
 import { toast } from 'sonner';
+import { useDebounce } from 'use-debounce';
 
 import FiltroAnuncios from './FiltroAnuncios';
 import KpiAnuncios from './KpiAnuncios';
 import TabelaAnuncios from './TabelaAnuncios';
 
+// =========================================================================
+// CARREGAMENTO MÁGICO (CACHE DA UI)
+// =========================================================================
+const ANUNCIOS_UI_STATE_KEY = 'STUDIO57_ANUNCIOS_UI_STATE_V2';
+
+const getCachedUiState = () => {
+    if (typeof window === 'undefined') return null;
+    try {
+        const saved = localStorage.getItem(ANUNCIOS_UI_STATE_KEY);
+        return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+        return null;
+    }
+};
+
+// Funções de busca da API
 const fetchAdAccounts = async () => {
     const res = await fetch('/api/meta/ad-accounts');
-    if (!res.ok) throw new Error('Erro contas');
+    if (!res.ok) throw new Error('Erro ao carregar contas');
     return res.json();
 };
 
@@ -25,7 +42,7 @@ const fetchCampaignsAndSets = async () => {
 
 const fetchAdsData = async () => {
     const res = await fetch('/api/meta/ads');
-    if (!res.ok) throw new Error('Erro anúncios');
+    if (!res.ok) throw new Error('Erro ao carregar anúncios');
     return res.json();
 };
 
@@ -39,17 +56,55 @@ const saveSelectedAccount = async (adAccountId) => {
 
 export default function AdsManager() {
     const queryClient = useQueryClient();
+    const isFirstRender = useRef(true);
 
-    // Estado centralizado de filtros que será repassado para a Tabela e KPIs
+    // =========================================================================
+    // ESTADOS DE UI (Layout Antigo de Luxo)
+    // =========================================================================
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isFilterOpen, setIsFilterOpen] = useState(false);
+    
     const [filters, setFilters] = useState({
         status: [], 
         startDate: '',
         endDate: '',
         campaignIds: [],
         adsetIds: [],
-        searchTerm: '' 
+        searchTerm: '' // Repassado pelo debounce
     });
 
+    // Debounce para a busca (espera 1 segundo para não travar a tela enquanto digita)
+    const [debouncedSearch] = useDebounce(searchTerm, 1000);
+
+    // Efeito para carregar a memória do navegador na primeira vez
+    useEffect(() => {
+        const cached = getCachedUiState();
+        if (cached) {
+            if (cached.searchTerm) setSearchTerm(cached.searchTerm);
+            if (cached.filters) setFilters(cached.filters);
+            if (cached.isFilterOpen !== undefined) setIsFilterOpen(cached.isFilterOpen);
+        }
+        isFirstRender.current = false;
+    }, []);
+
+    // Efeito para sincronizar a barra de busca com os filtros e salvar a memória
+    useEffect(() => {
+        if (isFirstRender.current) return;
+
+        const newFilters = { ...filters, searchTerm: debouncedSearch };
+        setFilters(newFilters);
+
+        localStorage.setItem(ANUNCIOS_UI_STATE_KEY, JSON.stringify({
+            searchTerm: debouncedSearch,
+            filters: newFilters,
+            isFilterOpen
+        }));
+    }, [debouncedSearch, filters.status, filters.startDate, filters.endDate, filters.campaignIds, filters.adsetIds, isFilterOpen]);
+
+
+    // =========================================================================
+    // COMUNICAÇÃO COM O SERVIDOR (TanStack Query)
+    // =========================================================================
     const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
         queryKey: ['meta-accounts'],
         queryFn: fetchAdAccounts,
@@ -71,78 +126,130 @@ export default function AdsManager() {
     const mutationChangeAccount = useMutation({
         mutationFn: saveSelectedAccount,
         onSuccess: () => {
-            toast.success('Conta alterada!');
+            toast.success('Conta de Anúncios alterada!');
             queryClient.invalidateQueries({ queryKey: ['meta-accounts'] });
             queryClient.invalidateQueries({ queryKey: ['meta-filters'] });
             queryClient.invalidateQueries({ queryKey: ['meta-ads'] });
+            // Limpa os filtros ao trocar de conta
             setFilters({ status: [], startDate: '', endDate: '', campaignIds: [], adsetIds: [], searchTerm: '' });
+            setSearchTerm('');
         }
     });
 
-    if (isLoadingAccounts) return <div className="p-10 text-center"><FontAwesomeIcon icon={faSpinner} spin className="mr-2"/> Carregando contas...</div>;
+    if (isLoadingAccounts) return <div className="p-10 text-center flex flex-col items-center"><FontAwesomeIcon icon={faSpinner} spin size="2x" className="text-blue-500 mb-4"/> <p className="text-gray-600">Conectando ao Meta...</p></div>;
 
     if (!accountsData?.accounts || accountsData.accounts.length === 0) {
         return (
             <div className="p-10 text-center bg-gray-50 border rounded-lg">
                 <FontAwesomeIcon icon={faExclamationTriangle} className="text-yellow-500 text-3xl mb-3" />
                 <h3 className="font-bold text-gray-700">Conta não conectada</h3>
+                <p className="text-sm text-gray-500 mt-2">Nenhuma conta de anúncios foi vinculada a esta organização.</p>
             </div>
         );
     }
 
-    // LISTA PURA DE ANÚNCIOS VINDOS DA API NOVA
     const ads = adsResponse?.data || [];
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <FontAwesomeIcon icon={faMeta} className="text-blue-600" /> Gestão de Tráfego
-                </h2>
-                <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-500">CONTA:</span>
-                    <select 
-                        className="bg-gray-50 border border-gray-300 text-sm rounded p-2"
-                        value={accountsData.selected_account_id || ''}
-                        onChange={(e) => mutationChangeAccount.mutate(e.target.value)}
+            
+            {/* CABEÇALHO EXECUTIVO E BARRA DE AÇÕES */}
+            <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100 gap-4">
+                
+                {/* Seletor de Contas */}
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                    <div className="bg-blue-50 p-2 rounded-lg">
+                        <FontAwesomeIcon icon={faMeta} className="text-blue-600 text-xl" /> 
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Conta de Anúncios</span>
+                        <select 
+                            className="bg-transparent border-none text-sm font-semibold text-gray-800 focus:ring-0 cursor-pointer outline-none -ml-1"
+                            value={accountsData.selected_account_id || ''}
+                            onChange={(e) => mutationChangeAccount.mutate(e.target.value)}
+                        >
+                            <option value="" disabled>Selecione uma conta...</option>
+                            {accountsData.accounts.map(acc => (
+                                <option key={acc.id} value={acc.id}>{acc.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                {/* Barra de Busca e Botão de Filtro (Visual Antigo) */}
+                <div className="flex items-center gap-3 w-full md:w-auto flex-1 md:justify-end">
+                    <div className="relative flex-1 max-w-md w-full">
+                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Buscar campanha, anúncio..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-gray-50 hover:bg-white focus:bg-white"
+                        />
+                    </div>
+                    <button
+                        onClick={() => setIsFilterOpen(!isFilterOpen)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                            isFilterOpen || filters.status.length > 0
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                        }`}
                     >
-                        <option value="" disabled>Selecione...</option>
-                        {accountsData.accounts.map(acc => (
-                            <option key={acc.id} value={acc.id}>{acc.name}</option>
-                        ))}
-                    </select>
+                        <FontAwesomeIcon icon={faFilter} />
+                        <span className="hidden sm:inline">Filtros Avançados</span>
+                    </button>
                 </div>
             </div>
 
-            <FiltroAnuncios 
-                filters={filters} 
-                setFilters={setFilters} 
-                campaigns={filterData?.campaigns || []} 
-                adsets={filterData?.adsets || []}
-                refetch={refetch}
-            />
+            {/* ÁREA DE FILTROS AVANÇADOS (Expansível) */}
+            {isFilterOpen && (
+                <div className="animate-fade-in-down">
+                    <FiltroAnuncios 
+                        filters={filters} 
+                        setFilters={setFilters} 
+                        campaigns={filterData?.campaigns || []} 
+                        adsets={filterData?.adsets || []}
+                        refetch={refetch}
+                    />
+                </div>
+            )}
 
+            {/* CONTEÚDO PRINCIPAL (KPIs e Tabela) */}
             {!accountsData.selected_account_id ? (
-                <div className="text-center p-10 bg-yellow-50">Selecione uma conta acima.</div>
+                <div className="text-center p-10 bg-yellow-50 rounded-lg border border-yellow-100">
+                    <p className="text-yellow-700 font-medium">Por favor, selecione uma conta de anúncios no menu acima para começar.</p>
+                </div>
             ) : (
                 <>
-                    {/* Passamos todos os dados, e o KPI e Tabela farão o trabalho sujo */}
                     <KpiAnuncios data={ads} isLoading={isLoadingAds} />
                     
-                    <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-                        <div className="p-4 border-b flex justify-between items-center bg-gray-50">
-                            <h3 className="font-bold text-gray-700"><FontAwesomeIcon icon={faLayerGroup} className="mr-2 text-gray-400"/>Lista de Anúncios</h3>
-                            <span className="text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded-full">{ads.length} criativos</span>
+                    <main className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="p-4 border-b flex justify-between items-center bg-gray-50/50">
+                            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                <FontAwesomeIcon icon={faLayerGroup} className="text-gray-400"/>
+                                Lista de Anúncios
+                            </h3>
+                            <span className="text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded-full font-semibold">
+                                {ads.length} criativos
+                            </span>
                         </div>
 
                         {isLoadingAds ? (
-                            <div className="p-20 text-center"><FontAwesomeIcon icon={faSpinner} spin size="2x" className="text-blue-500"/></div>
+                            <div className="flex flex-col items-center justify-center p-20 text-center">
+                                <FontAwesomeIcon icon={faSpinner} spin size="3x" className="text-blue-500 mb-4" />
+                                <p className="text-gray-600 font-medium">Buscando dados do Meta...</p>
+                            </div>
                         ) : isError ? (
-                            <div className="p-10 text-center text-red-500">Erro ao carregar dados.</div>
+                            <div className="flex flex-col items-center justify-center p-16 text-center bg-red-50">
+                                <FontAwesomeIcon icon={faExclamationTriangle} size="3x" className="text-red-500 mb-4" />
+                                <h3 className="text-lg font-bold text-red-700 mb-1">Erro de Conexão</h3>
+                                <p className="text-red-600 text-sm">Não foi possível carregar os dados desta conta.</p>
+                            </div>
                         ) : (
                             <TabelaAnuncios ads={ads} filters={filters} />
                         )}
-                    </div>
+                    </main>
                 </>
             )}
         </div>
