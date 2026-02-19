@@ -4,6 +4,11 @@ import { FacebookAdsApi, AdAccount } from 'facebook-nodejs-business-sdk';
 
 export async function GET(request) {
   try {
+    // 1. A MÁGICA DAS DATAS: Lemos as datas que o painel enviou na URL
+    const { searchParams } = new URL(request.url);
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -23,11 +28,13 @@ export async function GET(request) {
     const adAccountId = integracao.ad_account_id.startsWith('act_') ? integracao.ad_account_id : `act_${integracao.ad_account_id}`;
     const account = new AdAccount(adAccountId);
 
-    // =========================================================================
-    // A MÁGICA CONTRA O BLOQUEIO: 
-    // Pedimos a estrutura aninhada. Em 1 única chamada o FB devolve:
-    // Nome do anúncio, foto, nome da campanha e os INSIGHTS (gastos e leads).
-    // =========================================================================
+    // 2. REGRA DE PERÍODO: Se tem data, pede o período exato. Se não tem, pede o 'maximum'
+    let insightsField = 'insights.date_preset(maximum){spend,impressions,clicks,reach,actions,cost_per_action_type}';
+    
+    if (startDate && endDate) {
+        insightsField = `insights.time_range({"since":"${startDate}","until":"${endDate}"}){spend,impressions,clicks,reach,actions,cost_per_action_type}`;
+    }
+
     const fields = [
         'name', 
         'status', 
@@ -35,14 +42,12 @@ export async function GET(request) {
         'creative{thumbnail_url,image_url}', 
         'campaign{id,name}', 
         'adset{id,name}',
-        // MUDANÇA AQUI: Trocamos lifetime por maximum conforme a nova exigência da API do Meta
-        'insights.date_preset(maximum){spend,impressions,clicks,reach,actions,cost_per_action_type}'
+        insightsField // Injetamos a regra de período certa aqui!
     ];
 
     const adsData = await account.getAds(fields, { limit: 200 });
 
     const adsFormatted = adsData.map((ad) => {
-        // Extraímos os insights de forma segura
         let stat = null;
         if (ad.insights && ad.insights.data && ad.insights.data.length > 0) {
             stat = ad.insights.data[0];

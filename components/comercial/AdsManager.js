@@ -12,9 +12,6 @@ import FiltroAnuncios from './FiltroAnuncios';
 import KpiAnuncios from './KpiAnuncios';
 import TabelaAnuncios from './TabelaAnuncios';
 
-// =========================================================================
-// CARREGAMENTO MÁGICO (CACHE DA UI)
-// =========================================================================
 const ANUNCIOS_UI_STATE_KEY = 'STUDIO57_ANUNCIOS_UI_STATE_V2';
 
 const getCachedUiState = () => {
@@ -27,7 +24,6 @@ const getCachedUiState = () => {
     }
 };
 
-// Funções de busca da API
 const fetchAdAccounts = async () => {
     const res = await fetch('/api/meta/ad-accounts');
     if (!res.ok) throw new Error('Erro ao carregar contas');
@@ -40,8 +36,13 @@ const fetchCampaignsAndSets = async () => {
     return res.json();
 };
 
-const fetchAdsData = async () => {
-    const res = await fetch('/api/meta/ads');
+// 1. A MÁGICA AQUI: A função agora recebe as datas e manda para a nossa API
+const fetchAdsData = async (startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    
+    const res = await fetch(`/api/meta/ads?${params.toString()}`);
     if (!res.ok) throw new Error('Erro ao carregar anúncios');
     return res.json();
 };
@@ -58,9 +59,6 @@ export default function AdsManager() {
     const queryClient = useQueryClient();
     const isFirstRender = useRef(true);
 
-    // =========================================================================
-    // ESTADOS DE UI (Layout Antigo de Luxo)
-    // =========================================================================
     const [searchTerm, setSearchTerm] = useState('');
     const [isFilterOpen, setIsFilterOpen] = useState(false);
     
@@ -70,13 +68,11 @@ export default function AdsManager() {
         endDate: '',
         campaignIds: [],
         adsetIds: [],
-        searchTerm: '' // Repassado pelo debounce
+        searchTerm: '' 
     });
 
-    // Debounce para a busca (espera 1 segundo para não travar a tela enquanto digita)
     const [debouncedSearch] = useDebounce(searchTerm, 1000);
 
-    // Efeito para carregar a memória do navegador na primeira vez
     useEffect(() => {
         const cached = getCachedUiState();
         if (cached) {
@@ -87,7 +83,6 @@ export default function AdsManager() {
         isFirstRender.current = false;
     }, []);
 
-    // Efeito para sincronizar a barra de busca com os filtros e salvar a memória
     useEffect(() => {
         if (isFirstRender.current) return;
 
@@ -101,10 +96,6 @@ export default function AdsManager() {
         }));
     }, [debouncedSearch, filters.status, filters.startDate, filters.endDate, filters.campaignIds, filters.adsetIds, isFilterOpen]);
 
-
-    // =========================================================================
-    // COMUNICAÇÃO COM O SERVIDOR (TanStack Query)
-    // =========================================================================
     const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
         queryKey: ['meta-accounts'],
         queryFn: fetchAdAccounts,
@@ -117,9 +108,10 @@ export default function AdsManager() {
         enabled: !!accountsData?.selected_account_id,
     });
 
+    // 2. A MÁGICA AQUI: O React Query agora "escuta" as datas. Se a data mudar, ele busca de novo sozinho!
     const { data: adsResponse, isLoading: isLoadingAds, isError, refetch } = useQuery({
-        queryKey: ['meta-ads', accountsData?.selected_account_id],
-        queryFn: fetchAdsData,
+        queryKey: ['meta-ads', accountsData?.selected_account_id, filters.startDate, filters.endDate],
+        queryFn: () => fetchAdsData(filters.startDate, filters.endDate),
         enabled: !!accountsData?.selected_account_id,
     });
 
@@ -130,7 +122,6 @@ export default function AdsManager() {
             queryClient.invalidateQueries({ queryKey: ['meta-accounts'] });
             queryClient.invalidateQueries({ queryKey: ['meta-filters'] });
             queryClient.invalidateQueries({ queryKey: ['meta-ads'] });
-            // Limpa os filtros ao trocar de conta
             setFilters({ status: [], startDate: '', endDate: '', campaignIds: [], adsetIds: [], searchTerm: '' });
             setSearchTerm('');
         }
@@ -152,11 +143,7 @@ export default function AdsManager() {
 
     return (
         <div className="space-y-6">
-            
-            {/* CABEÇALHO EXECUTIVO E BARRA DE AÇÕES */}
             <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100 gap-4">
-                
-                {/* Seletor de Contas */}
                 <div className="flex items-center gap-3 w-full md:w-auto">
                     <div className="bg-blue-50 p-2 rounded-lg">
                         <FontAwesomeIcon icon={faMeta} className="text-blue-600 text-xl" /> 
@@ -176,7 +163,6 @@ export default function AdsManager() {
                     </div>
                 </div>
 
-                {/* Barra de Busca e Botão de Filtro (Visual Antigo) */}
                 <div className="flex items-center gap-3 w-full md:w-auto flex-1 md:justify-end">
                     <div className="relative flex-1 max-w-md w-full">
                         <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -191,7 +177,7 @@ export default function AdsManager() {
                     <button
                         onClick={() => setIsFilterOpen(!isFilterOpen)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                            isFilterOpen || filters.status.length > 0
+                            isFilterOpen || filters.status.length > 0 || filters.startDate
                                 ? 'bg-blue-50 text-blue-700 border border-blue-200'
                                 : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
                         }`}
@@ -202,7 +188,6 @@ export default function AdsManager() {
                 </div>
             </div>
 
-            {/* ÁREA DE FILTROS AVANÇADOS (Expansível) */}
             {isFilterOpen && (
                 <div className="animate-fade-in-down">
                     <FiltroAnuncios 
@@ -215,7 +200,6 @@ export default function AdsManager() {
                 </div>
             )}
 
-            {/* CONTEÚDO PRINCIPAL (KPIs e Tabela) */}
             {!accountsData.selected_account_id ? (
                 <div className="text-center p-10 bg-yellow-50 rounded-lg border border-yellow-100">
                     <p className="text-yellow-700 font-medium">Por favor, selecione uma conta de anúncios no menu acima para começar.</p>
