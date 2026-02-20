@@ -6,14 +6,15 @@ import {
     updateUserAction, 
     deleteUserAction, 
     toggleUserStatus, 
-    resetUserPassword 
-} from '@/app/(main)/configuracoes/usuarios/actions'; // Certifique-se que o caminho está correto
+    resetUserPassword,
+    forceUnlockUser // <--- Importamos a nova action de liberação
+} from '@/app/(main)/configuracoes/usuarios/actions'; 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
     faPlus, faTimes, faSpinner, faSearch, faFilter, 
     faUserShield, faKey, faSort, faSortUp, faSortDown, 
     faCalendarAlt, faUsers, faUserCheck, faUserSlash, faClock,
-    faPen, faTrash // Adicionei ícones de edição e lixeira
+    faPen, faTrash, faUnlock, faExclamationTriangle // <--- Novos ícones
 } from '@fortawesome/free-solid-svg-icons';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -82,7 +83,6 @@ const UserAvatar = ({ nome, sobrenome, url }) => {
     );
 };
 
-// --- Badge de Status Online ---
 const UserStatusBadge = ({ lastSeenDate }) => {
     if (!lastSeenDate) return <span className="text-xs text-gray-400">Nunca acessou</span>;
 
@@ -90,7 +90,6 @@ const UserStatusBadge = ({ lastSeenDate }) => {
     const now = new Date();
     const diffInMinutes = (now - lastSeen) / 1000 / 60;
     
-    // Consideramos "Online" se visto nos últimos 5 minutos
     const isOnline = diffInMinutes < 5;
 
     if (isOnline) {
@@ -132,7 +131,6 @@ const AddUserModal = ({ isOpen, onClose, allRoles, allEmployees, organizationId 
 
     const { mutate, isPending } = useMutation({
         mutationFn: async (formData) => {
-            // Server Action
             const result = await createUser(null, formData);
             if (!result.success) throw new Error(result.message);
             return result;
@@ -172,7 +170,7 @@ const AddUserModal = ({ isOpen, onClose, allRoles, allEmployees, organizationId 
                         <input type="email" name="email" required className="input-std" placeholder="email@exemplo.com" />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Senha</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Senha Inicial</label>
                         <input type="password" name="password" required className="input-std" placeholder="******" minLength={6} />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -203,7 +201,7 @@ const AddUserModal = ({ isOpen, onClose, allRoles, allEmployees, organizationId 
     );
 };
 
-// --- Modal de Edição de Usuário (NOVO) ---
+// --- Modal de Edição ---
 const EditUserModal = ({ isOpen, onClose, user, allRoles, allEmployees, organizationId }) => {
     const queryClient = useQueryClient();
     
@@ -233,7 +231,6 @@ const EditUserModal = ({ isOpen, onClose, user, allRoles, allEmployees, organiza
                 <form action={mutate} className="space-y-4">
                     <input type="hidden" name="userId" value={user.id} />
                     
-                    {/* Toggle Ativo/Inativo na edição */}
                     <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
                         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Status de Acesso</span>
                         <label className="relative inline-flex items-center cursor-pointer">
@@ -270,7 +267,7 @@ const EditUserModal = ({ isOpen, onClose, user, allRoles, allEmployees, organiza
     );
 };
 
-// --- Modal de Senha ---
+// --- Modal de Senha Manual ---
 const ResetPasswordModal = ({ isOpen, onClose, user }) => {
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -301,12 +298,77 @@ const ResetPasswordModal = ({ isOpen, onClose, user }) => {
     );
 };
 
+// --- MODAL MÁGICO DO DEVONILDO: BYPASS DE AUTENTICAÇÃO ---
+const ForceUnlockModal = ({ isOpen, onClose, user, organizationId }) => {
+    const queryClient = useQueryClient();
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleUnlock = async () => {
+        setIsLoading(true);
+        const result = await forceUnlockUser(user.id);
+        setIsLoading(false);
+        
+        if (result.success) { 
+            toast.success(result.message); 
+            queryClient.invalidateQueries({ queryKey: ['users', organizationId] });
+            onClose(); 
+        } else { 
+            toast.error(result.message); 
+        }
+    };
+
+    if (!isOpen || !user) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in zoom-in-95">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+                <div className="bg-red-50 dark:bg-red-900/30 p-6 text-center border-b border-red-100 dark:border-red-900/50">
+                    <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center mb-4">
+                        <FontAwesomeIcon icon={faExclamationTriangle} className="text-3xl text-red-600 dark:text-red-500" />
+                    </div>
+                    <h3 className="text-xl font-bold text-red-700 dark:text-red-400 mb-2">Liberação Forçada (Bypass)</h3>
+                    <p className="text-sm text-red-600/80 dark:text-red-400/80 leading-relaxed">
+                        Você está prestes a liberar o acesso do usuário <strong className="text-red-800 dark:text-red-300">{user.nome}</strong> sem a necessidade de verificação por e-mail.
+                    </p>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                    <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 text-center">
+                        <span className="block text-xs text-gray-500 mb-1 uppercase tracking-wider font-bold">A senha deste usuário será redefinida para:</span>
+                        <span className="text-2xl font-mono font-bold text-gray-800 dark:text-white tracking-widest">123456</span>
+                    </div>
+
+                    <p className="text-xs text-gray-500 text-center">
+                        ⚠️ Esta ação ignora a segurança do e-mail. Utilize isso apenas para usuários que possuem e-mails fictícios ou em casos de extrema exceção. O usuário poderá alterar a senha depois.
+                    </p>
+
+                    <div className="flex justify-between gap-3 pt-4">
+                        <button type="button" onClick={onClose} className="flex-1 btn-secondary bg-gray-100">Cancelar</button>
+                        <button 
+                            type="button" 
+                            onClick={handleUnlock} 
+                            disabled={isLoading} 
+                            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            {isLoading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faUnlock} />}
+                            {isLoading ? 'Liberando...' : 'Estou Ciente, Liberar'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- Componente Principal ---
 export default function UserManagementForm({ initialUsers, allEmployees, allRoles, organizationId }) {
     const queryClient = useQueryClient();
+    
+    // Estados dos Modais
     const [isAddUserModalOpen, setAddUserModalOpen] = useState(false);
-    const [editingUser, setEditingUser] = useState(null); // Estado para edição
+    const [editingUser, setEditingUser] = useState(null); 
     const [passwordModalUser, setPasswordModalUser] = useState(null);
+    const [unlockModalUser, setUnlockModalUser] = useState(null); // <--- Novo Estado
     
     // Estado de UI
     const [uiState, setUiState] = usePersistentUiState({
@@ -451,17 +513,9 @@ export default function UserManagementForm({ initialUsers, allEmployees, allRole
             `}</style>
 
             <AddUserModal isOpen={isAddUserModalOpen} onClose={() => setAddUserModalOpen(false)} allRoles={allRoles} allEmployees={allEmployees} organizationId={organizationId} />
-            
-            <EditUserModal 
-                isOpen={!!editingUser} 
-                onClose={() => setEditingUser(null)} 
-                user={editingUser} 
-                allRoles={allRoles} 
-                allEmployees={allEmployees} 
-                organizationId={organizationId} 
-            />
-            
+            <EditUserModal isOpen={!!editingUser} onClose={() => setEditingUser(null)} user={editingUser} allRoles={allRoles} allEmployees={allEmployees} organizationId={organizationId} />
             <ResetPasswordModal isOpen={!!passwordModalUser} onClose={() => setPasswordModalUser(null)} user={passwordModalUser} />
+            <ForceUnlockModal isOpen={!!unlockModalUser} onClose={() => setUnlockModalUser(null)} user={unlockModalUser} organizationId={organizationId} />
 
             {/* --- SEÇÃO DE KPIs --- */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700">
@@ -598,6 +652,16 @@ export default function UserManagementForm({ initialUsers, allEmployees, allRole
                                     {/* Ações */}
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            
+                                            {/* BOTÃO MÁGICO DE BYPASS DE AUTENTICAÇÃO */}
+                                            <button 
+                                                onClick={() => setUnlockModalUser(user)}
+                                                className="text-gray-400 hover:text-green-600 dark:hover:text-green-400 p-2 rounded-full hover:bg-green-50 dark:hover:bg-green-900/20 transition-all tooltip"
+                                                title="Forçar Liberação de Acesso (Bypass)"
+                                            >
+                                                <FontAwesomeIcon icon={faUnlock} />
+                                            </button>
+
                                             <button 
                                                 onClick={() => setEditingUser(user)}
                                                 className="text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 p-2 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all tooltip"
@@ -609,7 +673,7 @@ export default function UserManagementForm({ initialUsers, allEmployees, allRole
                                             <button 
                                                 onClick={() => setPasswordModalUser(user)}
                                                 className="text-gray-400 hover:text-yellow-600 dark:hover:text-yellow-400 p-2 rounded-full hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all tooltip"
-                                                title="Redefinir Senha"
+                                                title="Redefinir Senha Manualmente"
                                             >
                                                 <FontAwesomeIcon icon={faKey} />
                                             </button>

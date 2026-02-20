@@ -38,7 +38,7 @@ export async function createUser(prevState, formData) {
   const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: data.email,
     password: data.password,
-    email_confirm: true,
+    email_confirm: true, // Já forçamos a confirmação na criação também
     user_metadata: {
       nome: data.nome,
       sobrenome: data.sobrenome,
@@ -80,32 +80,26 @@ export async function createUser(prevState, formData) {
 }
 
 // ==============================================================================
-// 2. EDIÇÃO DE DADOS (RESTAURADO PARA O MODAL)
+// 2. EDIÇÃO DE DADOS 
 // ==============================================================================
 export async function updateUserAction(formData) {
   const userId = formData.get('userId')
   const roleId = formData.get('roleId')
   const funcionarioId = formData.get('funcionarioId')
-  // Converte "on" para true, null para false (caso venha do checkbox)
   const isActive = formData.get('isActive') === 'on' 
 
   try {
-    // 1. Atualiza dados básicos
     const { error } = await supabaseAdmin
       .from('usuarios')
       .update({
         funcao_id: roleId,
         funcionario_id: funcionarioId === 'null' ? null : funcionarioId,
-        // Se quiser atualizar o status aqui também, descomente:
-        // is_active: isActive, 
         updated_at: new Date()
       })
       .eq('id', userId)
 
     if (error) throw error
     
-    // 2. Sincroniza o status/banimento se o checkbox foi alterado no modal
-    // Chamamos a função de toggle para garantir que o Auth também seja atualizado
     await toggleUserStatus(userId, !isActive) 
 
     revalidatePath('/configuracoes/usuarios')
@@ -120,14 +114,9 @@ export async function updateUserAction(formData) {
 // 3. ALTERAR STATUS (ATIVAR/DESATIVAR COM BANIMENTO)
 // ==============================================================================
 export async function toggleUserStatus(userId, currentStatus) {
-  // Nota: currentStatus é o status ATUAL. O novo será o inverso.
-  // Se for passado um booleano direto para "statusDesejado", adapte a lógica abaixo.
-  // Aqui assumimos que se currentStatus=true, queremos desativar.
-  
   try {
     const newStatus = !currentStatus;
 
-    // A. Atualiza na tabela visual 'usuarios'
     const { error: dbError } = await supabaseAdmin
       .from('usuarios')
       .update({ is_active: newStatus })
@@ -135,11 +124,10 @@ export async function toggleUserStatus(userId, currentStatus) {
 
     if (dbError) throw new Error(dbError.message);
 
-    // B. Banir/Desbanir no Auth do Supabase (impede login real)
     if (newStatus === false) {
-       await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '876000h' }); // Banir por 100 anos
+       await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '876000h' }); 
     } else {
-       await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: 'none' }); // Remover banimento
+       await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: 'none' }); 
     }
 
     revalidatePath('/configuracoes/usuarios');
@@ -151,19 +139,13 @@ export async function toggleUserStatus(userId, currentStatus) {
 }
 
 // ==============================================================================
-// 4. EXCLUIR USUÁRIO (RESTAURADO PARA A LIXEIRA)
+// 4. EXCLUIR USUÁRIO
 // ==============================================================================
 export async function deleteUserAction(userId) {
   try {
-    // A. Deleta do Auth (Sistema de Login)
     const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId)
-    
-    if (authError) {
-        console.error("Erro ao deletar do Auth:", authError)
-    }
+    if (authError) console.error("Erro ao deletar do Auth:", authError)
 
-    // B. Deleta da tabela pública 'usuarios'
-    // (Geralmente o Supabase deleta em cascata se configurado, mas garantimos aqui)
     const { error: dbError } = await supabaseAdmin
       .from('usuarios')
       .delete()
@@ -175,7 +157,7 @@ export async function deleteUserAction(userId) {
     return { success: true, message: 'Usuário excluído definitivamente.' }
   } catch (error) {
     console.error('Erro ao excluir:', error)
-    if (error.code === '23503') { // Código Postgres para violação de chave estrangeira
+    if (error.code === '23503') {
         return { success: false, message: 'Não é possível excluir: Usuário possui vínculos (vendas, logs, etc). Tente apenas Desativar.' }
     }
     return { success: false, message: 'Erro ao excluir usuário.' }
@@ -183,7 +165,7 @@ export async function deleteUserAction(userId) {
 }
 
 // ==============================================================================
-// 5. REDEFINIR SENHA (NOVO)
+// 5. REDEFINIR SENHA 
 // ==============================================================================
 export async function resetUserPassword(userId, newPassword) {
     try {
@@ -192,7 +174,8 @@ export async function resetUserPassword(userId, newPassword) {
         }
 
         const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-            password: newPassword
+            password: newPassword,
+            email_confirm: true // Se não estava confirmado, confirma agora
         });
 
         if (error) throw error;
@@ -201,5 +184,30 @@ export async function resetUserPassword(userId, newPassword) {
     } catch (error) {
         console.error('Erro ao resetar senha:', error);
         return { success: false, message: 'Erro ao redefinir a senha.' };
+    }
+}
+
+// ==============================================================================
+// 6. LIBERAÇÃO FORÇADA DE ACESSO (O "BYPASS" MÁGICO DO DEVONILDO 🪄)
+// ==============================================================================
+export async function forceUnlockUser(userId) {
+    try {
+        // Força a senha padrão e confirma o e-mail para acesso imediato
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+            password: '123456',
+            email_confirm: true,
+            ban_duration: 'none' // Garante que não está banido
+        });
+
+        if (error) throw error;
+
+        // Opcional: Garantir que ele tá ativo na nossa tabela visual
+        await supabaseAdmin.from('usuarios').update({ is_active: true }).eq('id', userId);
+
+        revalidatePath('/configuracoes/usuarios');
+        return { success: true, message: 'Acesso liberado! Senha padrão definida como 123456.' };
+    } catch (error) {
+        console.error('Erro ao forçar liberação:', error);
+        return { success: false, message: 'Erro ao liberar o acesso do usuário.' };
     }
 }

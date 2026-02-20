@@ -1,15 +1,75 @@
 "use client";
 
 import { useState, Fragment, useEffect, useRef } from 'react';
-import { createClient } from '../utils/supabase/client';
+import { createClient } from '../../utils/supabase/client';
 import { toast } from 'sonner';
+// --------------------------------------------------------
+// NOVAS IMPORTAÇÕES DO DEVONILDO 🧙‍♂️
+// --------------------------------------------------------
+import { useAuth } from '@/contexts/AuthContext'; // Para pegar o organizacao_id
+import { useMutation } from '@tanstack/react-query'; // Para salvar no banco
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faPlus, faSpinner, faTimes, faShieldAlt } from '@fortawesome/free-solid-svg-icons';
 
 export default function PermissionManager({ initialFuncoes }) {
   const supabase = createClient();
+  const { user } = useAuth(); // Pegando o usuário logado
+  
   const [funcoes, setFuncoes] = useState(initialFuncoes);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTargetState, setDragTargetState] = useState(false);
   const pendingChanges = useRef([]);
+
+  // Estados para o Modal de Criar Função
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newFuncaoNome, setNewFuncaoNome] = useState('');
+  const [newFuncaoDesc, setNewFuncaoDesc] = useState('');
+
+  // =================================================================================
+  // MUTAÇÃO PARA CRIAR NOVA FUNÇÃO (CUD usa useMutation) 🚀
+  // =================================================================================
+  const createFuncaoMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.organizacao_id) throw new Error("Organização não identificada. Recarregue a página.");
+      if (!newFuncaoNome.trim()) throw new Error("O nome da função é obrigatório, seu lindo!");
+
+      const novaFuncao = {
+        nome_funcao: newFuncaoNome.trim(),
+        descricao: newFuncaoDesc.trim(),
+        organizacao_id: user.organizacao_id,
+        // created_at é gerado automaticamente pelo banco (default now())
+      };
+
+      const { data, error } = await supabase
+        .from('funcoes')
+        .insert([novaFuncao])
+        .select()
+        .single();
+
+      if (error) {
+        // Tratando o seu índice único (idx_funcoes_organizacao_nome)
+        if (error.code === '23505') { 
+            throw new Error("Já existe uma função com este nome na sua organização.");
+        }
+        throw error;
+      }
+      return data;
+    },
+    onSuccess: (novaFuncaoCriada) => {
+      // Adicionamos a nova função na lista local, com as permissões zeradas
+      setFuncoes([...funcoes, { ...novaFuncaoCriada, permissoes: [] }]);
+      
+      // Limpamos a casa
+      setNewFuncaoNome('');
+      setNewFuncaoDesc('');
+      setShowAddModal(false);
+      
+      toast.success(`Função "${novaFuncaoCriada.nome_funcao}" criada com sucesso!`);
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    }
+  });
 
   useEffect(() => {
     const handleMouseUp = () => {
@@ -65,7 +125,7 @@ export default function PermissionManager({ initialFuncoes }) {
       ]
     },
     {
-      title: 'Coordenação BIM', // ✨ MÓDULO NOVO ✨
+      title: 'Coordenação BIM', 
       resources: [
         { key: 'bim', name: 'BIM Manager (3D)' },
       ]
@@ -171,7 +231,82 @@ export default function PermissionManager({ initialFuncoes }) {
   };
 
   return (
-    <div className="space-y-4 select-none">
+    <div className="space-y-4 select-none relative">
+      
+      {/* CABEÇALHO COM O BOTÃO DE ADICIONAR */}
+      <div className="flex justify-between items-center bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+        <div>
+          <h2 className="text-lg font-bold text-gray-800">Funções do Sistema</h2>
+          <p className="text-sm text-gray-500">Gerencie o que cada nível de acesso pode fazer no Studio 57.</p>
+        </div>
+        <button 
+          onClick={() => setShowAddModal(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-blue-700 transition flex items-center gap-2"
+        >
+          <FontAwesomeIcon icon={faPlus} /> Nova Função
+        </button>
+      </div>
+
+      {/* MODAL PARA ADICIONAR NOVA FUNÇÃO */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 animate-fade-in-up">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <FontAwesomeIcon icon={faShieldAlt} className="text-blue-600"/> 
+                Criar Nova Função
+              </h3>
+              <button 
+                onClick={() => setShowAddModal(false)}
+                className="text-gray-400 hover:text-red-500 transition"
+              >
+                <FontAwesomeIcon icon={faTimes} className="text-xl" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Nome da Função</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: Corretor Sênior" 
+                  value={newFuncaoNome}
+                  onChange={(e) => setNewFuncaoNome(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição (Opcional)</label>
+                <textarea 
+                  placeholder="Ex: Acesso apenas à visualização de vendas." 
+                  value={newFuncaoDesc}
+                  onChange={(e) => setNewFuncaoDesc(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none h-20"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button 
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-100 rounded-lg transition"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={() => createFuncaoMutation.mutate()}
+                disabled={createFuncaoMutation.isPending}
+                className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {createFuncaoMutation.isPending ? <FontAwesomeIcon icon={faSpinner} spin /> : 'Salvar Função'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TABELA DE PERMISSÕES */}
       <div className="overflow-x-auto border border-gray-200 rounded-lg custom-scrollbar pb-4">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">

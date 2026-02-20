@@ -1,6 +1,6 @@
 // app/(main)/configuracoes/permissoes/page.js
 import { createClient } from '../../../../utils/supabase/server';
-import PermissionManager from '../../../../components/PermissionManager';
+import PermissionManager from '../../../../components/configuracoes/PermissionManager';
 import { redirect } from 'next/navigation';
 
 export default async function PermissoesPage() {
