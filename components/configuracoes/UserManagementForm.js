@@ -2,19 +2,18 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { 
-    createUser, 
     updateUserAction, 
     deleteUserAction, 
     toggleUserStatus, 
     resetUserPassword,
-    forceUnlockUser // <--- Importamos a nova action de liberação
+    forceUnlockUser 
 } from '@/app/(main)/configuracoes/usuarios/actions'; 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
-    faPlus, faTimes, faSpinner, faSearch, faFilter, 
-    faUserShield, faKey, faSort, faSortUp, faSortDown, 
+    faTimes, faSpinner, faSearch, faFilter, 
+    faKey, faSort, faSortUp, faSortDown, 
     faCalendarAlt, faUsers, faUserCheck, faUserSlash, faClock,
-    faPen, faTrash, faUnlock, faExclamationTriangle // <--- Novos ícones
+    faPen, faTrash, faUnlock, faExclamationTriangle 
 } from '@fortawesome/free-solid-svg-icons';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -123,83 +122,6 @@ const StatCard = ({ title, value, icon, colorClass, bgColorClass }) => (
         </div>
     </div>
 );
-
-// --- Modal de Novo Usuário ---
-const AddUserModal = ({ isOpen, onClose, allRoles, allEmployees, organizationId }) => {
-    const queryClient = useQueryClient();
-    const formRef = useRef(null);
-
-    const { mutate, isPending } = useMutation({
-        mutationFn: async (formData) => {
-            const result = await createUser(null, formData);
-            if (!result.success) throw new Error(result.message);
-            return result;
-        },
-        onSuccess: () => {
-            toast.success('Usuário criado com sucesso!');
-            queryClient.invalidateQueries({ queryKey: ['users', organizationId] });
-            onClose();
-            if (formRef.current) formRef.current.reset();
-        },
-        onError: (error) => toast.error(error.message),
-    });
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-lg border border-gray-200 dark:border-gray-700">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold text-gray-800 dark:text-white">Novo Usuário</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-red-500"><FontAwesomeIcon icon={faTimes} /></button>
-                </div>
-                <form ref={formRef} action={mutate} className="space-y-4">
-                    <input type="hidden" name="organizationId" value={organizationId} />
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome</label>
-                            <input type="text" name="nome" required className="input-std" placeholder="Nome" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sobrenome</label>
-                            <input type="text" name="sobrenome" required className="input-std" placeholder="Sobrenome" />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
-                        <input type="email" name="email" required className="input-std" placeholder="email@exemplo.com" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Senha Inicial</label>
-                        <input type="password" name="password" required className="input-std" placeholder="******" minLength={6} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Função</label>
-                            <select name="funcao_id" required className="input-std">
-                                <option value="">Selecione...</option>
-                                {allRoles.map(r => <option key={r.id} value={r.id}>{r.nome_funcao}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Vincular RH</label>
-                            <select name="funcionario_id" className="input-std">
-                                <option value="">Nenhum</option>
-                                {allEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                    <div className="pt-4 flex justify-end gap-3">
-                        <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
-                        <button type="submit" disabled={isPending} className="btn-primary flex items-center gap-2">
-                            {isPending && <FontAwesomeIcon icon={faSpinner} className="animate-spin" />} Salvar
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
 
 // --- Modal de Edição ---
 const EditUserModal = ({ isOpen, onClose, user, allRoles, allEmployees, organizationId }) => {
@@ -365,10 +287,9 @@ export default function UserManagementForm({ initialUsers, allEmployees, allRole
     const queryClient = useQueryClient();
     
     // Estados dos Modais
-    const [isAddUserModalOpen, setAddUserModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState(null); 
     const [passwordModalUser, setPasswordModalUser] = useState(null);
-    const [unlockModalUser, setUnlockModalUser] = useState(null); // <--- Novo Estado
+    const [unlockModalUser, setUnlockModalUser] = useState(null); 
     
     // Estado de UI
     const [uiState, setUiState] = usePersistentUiState({
@@ -512,7 +433,6 @@ export default function UserManagementForm({ initialUsers, allEmployees, allRole
                 .btn-secondary { @apply px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors; }
             `}</style>
 
-            <AddUserModal isOpen={isAddUserModalOpen} onClose={() => setAddUserModalOpen(false)} allRoles={allRoles} allEmployees={allEmployees} organizationId={organizationId} />
             <EditUserModal isOpen={!!editingUser} onClose={() => setEditingUser(null)} user={editingUser} allRoles={allRoles} allEmployees={allEmployees} organizationId={organizationId} />
             <ResetPasswordModal isOpen={!!passwordModalUser} onClose={() => setPasswordModalUser(null)} user={passwordModalUser} />
             <ForceUnlockModal isOpen={!!unlockModalUser} onClose={() => setUnlockModalUser(null)} user={unlockModalUser} organizationId={organizationId} />
@@ -564,10 +484,6 @@ export default function UserManagementForm({ initialUsers, allEmployees, allRole
                         </select>
                         <FontAwesomeIcon icon={faFilter} className="absolute right-3 top-3 text-gray-400 text-xs pointer-events-none" />
                     </div>
-
-                    <button onClick={() => setAddUserModalOpen(true)} className="btn-primary flex items-center gap-2 whitespace-nowrap w-full sm:w-auto justify-center">
-                        <FontAwesomeIcon icon={faPlus} /> Novo Usuário
-                    </button>
                 </div>
             </div>
 
