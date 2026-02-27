@@ -17,7 +17,7 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
     const [config, setConfig] = useState(initialConfig || {});
     const [parcelasAdicionais, setParcelasAdicionais] = useState(initialConfig?.parcelas_adicionais || []);
     const [novaParcela, setNovaParcela] = useState({ valor: '', data_pagamento: '' });
-    
+
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -37,18 +37,18 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
         const { name, value } = e.target;
         setConfig(prev => ({ ...prev, [name]: value === '' ? null : parseFloat(value) || 0 }));
     };
-    
+
     const handleNovaParcelaChange = (e) => {
         const { name, value } = e.target;
-        setNovaParcela(prev => ({...prev, [name]: value}));
+        setNovaParcela(prev => ({ ...prev, [name]: value }));
     };
-    
+
     const handleAddParcelaAdicional = async () => {
         if (!novaParcela.valor || !novaParcela.data_pagamento || !config.id) {
             toast.warning('Para adicionar uma parcela, primeiro salve as condições de pagamento gerais e depois preencha o valor e a data da parcela adicional.');
             return;
         }
-        
+
         const { error } = await supabase
             .from('parcelas_adicionais')
             .insert({
@@ -65,7 +65,7 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
             onUpdate();
         }
     };
-    
+
     const handleRemoveParcelaAdicional = async (id) => {
         const { error } = await supabase.from('parcelas_adicionais').delete().eq('id', id);
         if (error) {
@@ -115,13 +115,13 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
     return (
         <div className="space-y-6">
             <div className="space-y-8">
-                 <fieldset>
+                <fieldset>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Desconto (%):</label>
                             <input type="number" name="desconto_percentual" value={config.desconto_percentual || 0} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md bg-gray-50" />
                         </div>
-                         <div>
+                        <div>
                             <label className="block text-sm font-medium text-gray-700">Entrada (%):</label>
                             <input type="number" name="entrada_percentual" value={config.entrada_percentual || 0} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" />
                         </div>
@@ -136,12 +136,12 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
                     </div>
                     {totalPercent !== 100 && (
                         <div className="mt-3 text-right text-sm flex items-center justify-end gap-2 text-yellow-700 bg-yellow-50 p-2 rounded-md">
-                           <FontAwesomeIcon icon={faInfoCircle} />
-                           <span>A soma dos percentuais (Entrada, Obra, Saldo) é de <strong>{totalPercent}%</strong>. O ideal é que a soma seja 100%.</span>
+                            <FontAwesomeIcon icon={faInfoCircle} />
+                            <span>A soma dos percentuais (Entrada, Obra, Saldo) é de <strong>{totalPercent}%</strong>. O ideal é que a soma seja 100%.</span>
                         </div>
                     )}
                 </fieldset>
-                
+
                 <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 border-t pt-6">
                     <div>
                         <legend className="text-base font-semibold text-gray-800 mb-2">Detalhes da Entrada</legend>
@@ -156,7 +156,7 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
                             </div>
                         </div>
                     </div>
-                     <div>
+                    <div>
                         <legend className="text-base font-semibold text-gray-800 mb-2">Detalhes das Parcelas da Obra</legend>
                         <div className="grid grid-cols-2 gap-4">
                             <div>
@@ -170,41 +170,14 @@ export default function CondicoesPagamento({ empreendimentoId, initialConfig, on
                         </div>
                     </div>
                 </fieldset>
-                
+
+                {/* A SEÇÃO DE PARCELAS ADICIONAIS FOI OCULTADA/REMOVIDA A PEDIDO DE NEGÓCIO 
                 <fieldset>
                      <legend className="text-lg font-semibold text-gray-800 border-t pt-4 mb-4">Parcelas Adicionais / Intermediárias</legend>
-                    <div className="space-y-3 mb-4">
-                        {parcelasAdicionais.map(p => (
-                            <div key={p.id} className="flex items-center gap-4 bg-gray-100 p-2 rounded-md text-sm">
-                                <span className="flex-grow">Valor: <strong>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.valor)}</strong></span>
-                                <span className="flex-grow">Data: <strong>{new Date(p.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></span>
-                                <button type="button" onClick={() => handleRemoveParcelaAdicional(p.id)}><FontAwesomeIcon icon={faTrash} className="text-red-500 hover:text-red-700" /></button>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="flex items-end gap-4 p-4 border rounded-md bg-gray-50">
-                        <div className="flex-grow">
-                             <label className="block text-sm font-medium text-gray-700">Valor (R$):</label>
-                             <IMaskInput
-                                mask="R$ num"
-                                blocks={{ num: { mask: Number, thousandsSeparator: '.', scale: 2, padFractionalZeros: true, radix: ',' }}}
-                                name="valor"
-                                value={novaParcela.valor}
-                                onAccept={(value) => setNovaParcela(prev => ({ ...prev, valor: value }))}
-                                className="mt-1 w-full p-2 border rounded-md"
-                                placeholder="R$ 10.000,00"
-                            />
-                        </div>
-                         <div className="flex-grow">
-                             <label className="block text-sm font-medium text-gray-700">Data de Pagamento:</label>
-                             <input type="date" name="data_pagamento" value={novaParcela.data_pagamento} onChange={handleNovaParcelaChange} className="mt-1 w-full p-2 border rounded-md" />
-                        </div>
-                        <button type="button" onClick={handleAddParcelaAdicional} className="bg-blue-500 text-white px-3 py-2 rounded-md hover:bg-blue-600 flex items-center gap-2 h-fit">
-                            <FontAwesomeIcon icon={faPlus} /> Adicionar
-                        </button>
-                    </div>
+...
                 </fieldset>
-                
+                */}
+
                 <div className="flex justify-end pt-6 border-t">
                     <button onClick={handleSave} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400">
                         {saving ? <><FontAwesomeIcon icon={faSpinner} spin className="mr-2" /> Salvando...</> : 'Salvar Condições'}

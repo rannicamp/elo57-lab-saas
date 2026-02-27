@@ -233,7 +233,7 @@ export default function FichaContrato({
                         <div className="flex items-center gap-3 mb-1 flex-wrap">
                             <h2 className="text-2xl font-bold text-gray-800">
                                 {contrato.tipo_documento === 'TERMO_DE_INTERESSE' ? 'Termo de Interesse' : 'Contrato'}
-                                <span className="text-blue-600 ml-2">#{contrato.numero_contrato || contrato.id.substring(0, 8)}</span>
+                                <span className="text-blue-600 ml-2">#{contrato.numero_contrato || String(contrato.id).substring(0, 8)}</span>
                             </h2>
                             <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full border ${contrato.status_contrato === 'Rascunho' ? 'bg-gray-100 text-gray-600 border-gray-200' :
                                 contrato.status_contrato === 'Assinado' ? 'bg-green-100 text-green-700 border-green-200' :
@@ -308,8 +308,13 @@ export default function FichaContrato({
                         />
                     )}
 
-                    {activeTab === 'cronograma' && isClienteDefined && contrato.tipo_documento === 'CONTRATO' && (
+                    {activeTab === 'cronograma' && contrato.tipo_documento === 'CONTRATO' && (
                         <div className="animate-fade-in space-y-8">
+                            {!isClienteDefined && (
+                                <div className="print:hidden mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-md border border-yellow-200">
+                                    <strong>Atenção:</strong> Defina um cliente na aba Venda para gerenciar o plano de pagamento.
+                                </div>
+                            )}
                             <div className="print:hidden">
                                 <PlanoPagamentoContrato contrato={contrato} onRecalculateSuccess={refreshContratoData} onUpdate={refreshContratoData} />
                             </div>
@@ -324,19 +329,35 @@ export default function FichaContrato({
                     )}
 
                     {/* CONTEÚDO DA NOVA ABA FINANCEIRO */}
-                    {activeTab === 'financeiro' && isClienteDefined && (
+                    {activeTab === 'financeiro' && (
                         <div className="animate-fade-in">
-                            <ExtratoFinanceiroCliente contatoId={contrato.contato_id} contrato={contrato} />
+                            {!isClienteDefined ? (
+                                <div className="mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-md border border-yellow-200">
+                                    <strong>Atenção:</strong> Defina um cliente na aba Venda para consultar o extrato financeiro.
+                                </div>
+                            ) : (
+                                <ExtratoFinanceiroCliente contatoId={contrato.contato_id} contrato={contrato} />
+                            )}
                         </div>
                     )}
 
-                    {activeTab === 'gerador' && isClienteDefined && (
+                    {activeTab === 'gerador' && (
                         <div className="animate-fade-in">
+                            {!isClienteDefined && (
+                                <div className="print:hidden mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-md border border-yellow-200">
+                                    <strong>Atenção:</strong> Defina um cliente na aba Venda para que os dados do comprador sejam inseridos no PDF.
+                                </div>
+                            )}
                             <GeradorContrato contrato={contrato} modeloContratoId={contrato.modelo_contrato_id} />
                         </div>
                     )}
-                    {activeTab === 'documentos' && isClienteDefined && (
+                    {activeTab === 'documentos' && (
                         <div className="print:hidden animate-fade-in">
+                            {!isClienteDefined && (
+                                <div className="mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-md border border-yellow-200">
+                                    <strong>Atenção:</strong> Defina um cliente para anexar documentos a este contrato.
+                                </div>
+                            )}
                             <ContratoAnexos contratoId={contrato.id} onUpdate={refreshContratoData} />
                         </div>
                     )}

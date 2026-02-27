@@ -24,7 +24,7 @@ const fetchComercializacaoData = async (supabase, empreendimentoId, organizacaoI
     const [empreendimentoRes, produtosRes, configRes] = await Promise.all([
         supabase.from('empreendimentos').select('*').eq('id', empreendimentoId).eq('organizacao_id', organizacaoId).single(),
         supabase.from('produtos_empreendimento').select('*').eq('empreendimento_id', empreendimentoId).eq('organizacao_id', organizacaoId).order('unidade'),
-        supabase.from('configuracoes_venda').select('*, parcelas_adicionais(*)').eq('empreendimento_id', empreendimentoId).eq('organizacao_id', organizacaoId).maybeSingle()
+        supabase.from('configuracoes_venda').select('*').eq('empreendimento_id', empreendimentoId).eq('organizacao_id', organizacaoId).maybeSingle()
     ]);
 
     if (empreendimentoRes.error) {
