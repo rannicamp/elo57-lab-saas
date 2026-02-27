@@ -1,8 +1,8 @@
 # Studio 57 - Sync LAB para PROD
 # Uso: powershell -ExecutionPolicy Bypass -File supabase\sync-to-prod.ps1
 
-$LAB_DIR   = "C:\Projetos\elo57-lab-saas"
-$TEMP_DIR  = "C:\Temp\studio57-prod-sync"
+$LAB_DIR = "C:\Projetos\elo57-lab-saas"
+$TEMP_DIR = "C:\Temp\studio57-prod-sync"
 $PROD_REPO = "https://github.com/rannicamp/studio57so-v8.git"
 
 Write-Host "=== Studio 57: Sync LAB -> PROD ===" -ForegroundColor Cyan
@@ -30,6 +30,7 @@ Write-Host "[4/5] Configurando Git..." -ForegroundColor Yellow
 Set-Location $TEMP_DIR
 
 git init
+git branch -M main 2>$null
 git remote add origin $PROD_REPO 2>$null
 git remote set-url origin $PROD_REPO 2>$null
 

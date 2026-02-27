@@ -2,46 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import imapSimple from 'imap-simple';
 
-// --- MESMO DECODIFICADOR DO RUN/ROUTE.JS ---
-const decodeHeaderValue = (str) => {
-    if (!str) return '';
-    if (Array.isArray(str)) str = str[0];
-    if (!str || typeof str !== 'string') return ''; 
-    
-    const unfolded = str.replace(/\r\n\s+/g, ' ');
-    const encodedWordRegex = /=\?([\w-]+)\?([BbQq])\?([^\?]*)\?=/g;
-
-    if (!encodedWordRegex.test(unfolded)) return unfolded.replace(/^"|"$/g, '').trim();
-
-    return unfolded.replace(encodedWordRegex, (match, charset, encoding, content) => {
-        try {
-            if (encoding.toUpperCase() === 'B') {
-                return Buffer.from(content, 'base64').toString('utf8');
-            } else if (encoding.toUpperCase() === 'Q') {
-                let decoded = content.replace(/_/g, ' ');
-                decoded = decoded.replace(/=([0-9A-F]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
-                try { return decodeURIComponent(escape(decoded)); } catch { return decoded; }
-            }
-            return match;
-        } catch (err) { return match; }
-    });
-};
-
-const checkCondition = (email, condition) => {
-    const part = email.parts.find(p => p.which && p.which.toUpperCase().includes('HEADER'));
-    const headers = part?.body || {};
-
-    const rawFrom = headers.from || headers.FROM || headers.From || [];
-    const rawSubject = headers.subject || headers.SUBJECT || headers.Subject || [];
-    const rawTo = headers.to || headers.TO || headers.To || [];
-
-    const fieldMap = {
-        'from': decodeHeaderValue(rawFrom).toLowerCase(),
-        'subject': decodeHeaderValue(rawSubject).toLowerCase(),
-        'to': decodeHeaderValue(rawTo).toLowerCase()
-    };
-
-    const textToCheck = fieldMap[condition.campo] || '';
+const checkCondition = (message, condition) => {
+    const textToCheck = message[condition.campo]?.toLowerCase() || '';
     const valueToCheck = (condition.valor || '').toLowerCase();
 
     if (!valueToCheck) return true;
@@ -59,15 +21,16 @@ const checkCondition = (email, condition) => {
 
 export async function POST(request) {
     const supabase = await createClient();
-    let connection = null;
 
     try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
-        const { data: config } = await supabase.from('email_configuracoes').select('*').eq('user_id', user.id).single();
-        if (!config) return NextResponse.json({ error: 'Configuração não encontrada' }, { status: 404 });
+        // 1. Busca configs do usuário
+        const { data: configs } = await supabase.from('email_configuracoes').select('*').eq('user_id', user.id);
+        if (!configs || configs.length === 0) return NextResponse.json({ error: 'Configuração não encontrada' }, { status: 404 });
 
+        // 2. Busca regras ativas do usuário
         const { data: regras } = await supabase
             .from('email_regras')
             .select('*')
@@ -77,90 +40,138 @@ export async function POST(request) {
 
         if (!regras || regras.length === 0) return NextResponse.json({ message: 'Sem regras ativas', processed: 0 });
 
-        const imapConfig = {
-            imap: {
-                user: config.imap_user || config.email,
-                password: config.senha_app,
-                host: config.imap_host,
-                port: config.imap_port || 993,
-                tls: true,
-                authTimeout: 15000,
-                tlsOptions: { rejectUnauthorized: false }
-            },
-        };
+        // 🔥 MUDANÇA ARQUITETURAL: Responde IMEDIATAMENTE e solta a tela do usuário.
+        // A lógica pesada vai rodar solta no Event Loop do Node.js.
+        (async () => {
+            try {
+                let totalProcessed = 0;
+                let totalMoved = 0;
 
-        connection = await imapSimple.connect(imapConfig);
-        await connection.openBox('INBOX', { readOnly: false });
+                // Itera sobre as configurações (contas) para processar regras separadamente caso tenham sido atribuídas a elas
+                for (const config of configs) {
+                    // Separa regras desta conta específica ou regras antigas ("órfãs")
+                    const accountRules = regras.filter(r => !r.account_id || r.account_id === config.id);
+                    if (accountRules.length === 0) continue;
 
-        // AUMENTO DE ESCOPO: Pega 50 mensagens para garantir
-        const searchCriteria = ['ALL'];
-        const fetchOptions = {
-            bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)'],
-            struct: true,
-            markSeen: false
-        };
-        
-        let messages = await connection.search(searchCriteria, fetchOptions);
-        
-        // Ordena por UID decrescente (mais novos primeiro) e pega os top 50
-        messages.sort((a, b) => b.attributes.uid - a.attributes.uid);
-        messages = messages.slice(0, 50);
+                    // 3. Busca MENSAGENS NO BANCO LOCAL (Supabase) em vez de ir ao IMAP (Muito mais rápido)
+                    // Lógica: pegar apenas as msgs recentes na INBOX
+                    const { data: messages } = await supabase
+                        .from('email_messages_cache')
+                        .select('uid, folder_path, subject, from_text, to_text, account_id')
+                        .eq('account_id', config.id)
+                        .ilike('folder_path', '%INBOX%') // ou eq('folder_path', 'INBOX') se for exatamente isso
+                        .order('uid', { ascending: false })
+                        .limit(100);
 
-        let processedCount = 0;
-        let movedCount = 0;
+                    if (!messages || messages.length === 0) continue;
 
-        for (const message of messages) {
-            let ruleApplied = false;
+                    const actionsToPerform = []; // Acumula ações necessárias: [{ uid, action, folder, message }]
 
-            for (const regra of regras) {
-                if (ruleApplied) break; 
+                    // 4. Analisa as mensagens LOCALMENTE contra as regras
+                    for (const message of messages) {
+                        // Adapta o objeto pra matchar o campo esperado
+                        const messageAdapter = {
+                            subject: message.subject,
+                            from: message.from_text,
+                            to: message.to_text
+                        };
 
-                try {
-                    if (regra.condicoes.length > 0 && regra.condicoes.every(cond => checkCondition(message, cond))) {
-                        const uid = message.attributes.uid;
-                        
-                        for (const acao of regra.acoes) {
-                            // LOGICA DE HONESTIDADE: Só conta se não der erro
+                        let ruleApplied = false;
+                        for (const regra of accountRules) {
+                            if (ruleApplied) break;
+
                             try {
-                                if (acao.tipo === 'move' && acao.pasta) {
-                                    await connection.moveMessage(uid, acao.pasta);
-                                    movedCount++; // Só incrementa se passar por essa linha sem erro
-                                } 
-                                else if (acao.tipo === 'markRead') {
-                                    await connection.addFlags(uid, '\\Seen');
+                                if (regra.condicoes.length > 0 && regra.condicoes.every(cond => checkCondition(messageAdapter, cond))) {
+                                    for (const acao of regra.acoes) {
+                                        actionsToPerform.push({
+                                            uid: message.uid,
+                                            action: acao.tipo, // 'move', 'markRead', 'delete'
+                                            folder: acao.pasta,
+                                            messageIdBase: message.id // ID interno para atualizar nosso cache dps
+                                        });
+                                    }
+                                    ruleApplied = true;
                                 }
-                                else if (acao.tipo === 'delete') {
-                                    try { await connection.moveMessage(uid, 'TRASH'); } 
-                                    catch { await connection.addFlags(uid, '\\Deleted'); }
-                                    movedCount++;
-                                }
-                            } catch (actionError) {
-                                console.error(`Falha na ação da regra para msg ${uid}:`, actionError);
-                                // Não incrementa movedCount se der erro
+                            } catch (err) {
+                                console.error('Erro avaliando regra no backend local:', err);
                             }
                         }
-                        ruleApplied = true;
+                        totalProcessed++;
                     }
-                } catch (err) {
-                    console.error("Erro processando regra na msg " + message.attributes.uid, err);
-                }
-            }
-            processedCount++;
-        }
 
-        return NextResponse.json({ 
-            success: true, 
-            processed: processedCount, 
-            moved: movedCount,
-            message: `Regras aplicadas.` 
+                    // 5. SE houver algo a fazer, ENTÃO abre a conexão IMAP
+                    if (actionsToPerform.length > 0) {
+                        const imapConfig = {
+                            imap: {
+                                user: config.imap_user || config.email,
+                                password: config.senha_app,
+                                host: config.imap_host,
+                                port: config.imap_port || 993,
+                                tls: true,
+                                authTimeout: 15000,
+                                tlsOptions: { rejectUnauthorized: false }
+                            },
+                        };
+
+                        let connection = null;
+                        try {
+                            connection = await imapSimple.connect(imapConfig);
+                            await connection.openBox('INBOX', { readOnly: false });
+
+                            for (const task of actionsToPerform) {
+                                try {
+                                    if (task.action === 'move' && task.folder) {
+                                        await connection.moveMessage(task.uid, task.folder);
+                                        totalMoved++;
+                                        // Atualiza cache
+                                        await supabase.from('email_messages_cache').update({ folder_path: task.folder }).eq('account_id', config.id).eq('uid', task.uid);
+                                    }
+                                    else if (task.action === 'markRead') {
+                                        await connection.addFlags(task.uid, '\\Seen');
+                                        await supabase.from('email_messages_cache').update({ is_read: true }).eq('account_id', config.id).eq('uid', task.uid);
+                                    }
+                                    else if (task.action === 'delete') {
+                                        try {
+                                            await connection.moveMessage(task.uid, 'TRASH');
+                                            await supabase.from('email_messages_cache').update({ folder_path: 'TRASH' }).eq('account_id', config.id).eq('uid', task.uid);
+                                        }
+                                        catch {
+                                            await connection.addFlags(task.uid, '\\Deleted');
+                                            const flags = ['\\Deleted'];
+                                            await supabase.from('email_messages_cache').update({ flags }).eq('account_id', config.id).eq('uid', task.uid);
+                                        }
+                                        totalMoved++;
+                                    }
+                                } catch (actionError) {
+                                    console.error(`Falha na ação da regra para msg uid ${task.uid}:`, actionError);
+                                }
+                            }
+                        } catch (connectionError) {
+                            console.error('Motor IMAP falhou durante a aplicação de regras:', connectionError);
+                        } finally {
+                            if (connection) {
+                                try { connection.end(); } catch (e) { }
+                            }
+                        }
+                    }
+                }
+                // Fim do Loop
+
+                console.log(`🪄 [Regras Background]: Concluído. Processados: ${totalProcessed}. Movidos: ${totalMoved}.`);
+
+            } catch (bgError) {
+                console.error('🔥 [Regras Background] Erro fatal durante execução solta:', bgError);
+            }
+        })(); // Fim da execução assíncrona não blocante
+
+        // O usuário já recebe essa resposta na mesma hora!
+        return NextResponse.json({
+            success: true,
+            message: `Processamento em background iniciado.`
         });
 
     } catch (error) {
-        console.error('Erro no motor de regras (apply):', error);
+        console.error('Erro de autorização na chamada das regras:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });
-    } finally {
-        if (connection) {
-            try { connection.end(); } catch (e) {}
-        }
     }
 }

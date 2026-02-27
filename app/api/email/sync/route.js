@@ -3,7 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import imapSimple from 'imap-simple';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; 
+export const maxDuration = 300;
 
 export async function POST(request) {
     const supabase = await createClient();
@@ -41,7 +41,7 @@ export async function POST(request) {
                 };
 
                 connection = await imapSimple.connect(imapConfig);
-                
+
                 // 3. Descobre TODAS as pastas
                 const boxes = await connection.getBoxes();
                 const allFolders = getAllFolderPaths(boxes);
@@ -68,18 +68,18 @@ export async function POST(request) {
                             .single();
 
                         const lastUid = maxUidData?.uid || 0;
-                        
+
                         // Busca no IMAP
                         const searchCriteria = [['UID', `${lastUid + 1}:*`]];
-                        
+
                         const fetchOptions = {
-                            bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)'],
+                            bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID CC BCC)'],
                             struct: true,
-                            markSeen: false 
+                            markSeen: false
                         };
 
                         const messages = await connection.search(searchCriteria, fetchOptions);
-                        
+
                         if (messages.length === 0) continue;
 
                         const batchSize = 100;
@@ -108,10 +108,10 @@ export async function POST(request) {
                                     from_text: decodeHeader(from).substring(0, 100),
                                     date: date,
                                     is_read: isRead, // <--- Agora usa o valor real!
-                                    conteudo_cache: null, 
+                                    conteudo_cache: null,
                                     html_body: null,
                                     text_body: null,
-                                    has_attachments: false, 
+                                    has_attachments: false,
                                     updated_at: new Date().toISOString()
                                 });
                             }
@@ -121,9 +121,9 @@ export async function POST(request) {
                                 // Mas como você vai limpar a tabela, ele vai inserir tudo certo agora.
                                 await supabase
                                     .from('email_messages_cache')
-                                    .upsert(upsertData, { 
+                                    .upsert(upsertData, {
                                         onConflict: 'account_id, folder_path, uid',
-                                        ignoreDuplicates: true 
+                                        ignoreDuplicates: true
                                     });
                                 totalSynced += upsertData.length;
                             }
@@ -138,14 +138,14 @@ export async function POST(request) {
 
             } catch (err) {
                 console.error(`Erro conta ${config.email}:`, err);
-                if (connection) try { connection.end(); } catch {}
+                if (connection) try { connection.end(); } catch { }
             }
         }
 
-        return NextResponse.json({ 
-            success: true, 
-            message: `Sync completo. ${totalSynced} itens processados.`, 
-            totalNew: totalSynced 
+        return NextResponse.json({
+            success: true,
+            message: `Sync completo. ${totalSynced} itens processados.`,
+            totalNew: totalSynced
         });
 
     } catch (error) {
@@ -159,9 +159,9 @@ function getAllFolderPaths(boxes, parentPath = '') {
     for (const [key, value] of Object.entries(boxes)) {
         const delimiter = value.delimiter || '/';
         const fullPath = parentPath ? parentPath + delimiter + key : key;
-        
+
         if (!value.attribs || !value.attribs.some(a => typeof a === 'string' && a.toLowerCase().includes('noselect'))) {
-             paths.push(fullPath);
+            paths.push(fullPath);
         }
 
         if (value.children) {
