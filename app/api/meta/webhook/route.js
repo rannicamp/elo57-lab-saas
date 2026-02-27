@@ -26,9 +26,9 @@ function sanitizePhone(phone) {
     return clean;
 }
 
-// Busca a coluna "ENTRADA" do SISTEMA (Org 8)
+// Busca a coluna "ENTRADA" do SISTEMA (Org 1)
 async function getSystemEntryColumn(supabase) {
-    const SYSTEM_ORG_ID = 8;
+    const SYSTEM_ORG_ID = 1;
     const { data: coluna } = await supabase
         .from('colunas_funil')
         .select('id')

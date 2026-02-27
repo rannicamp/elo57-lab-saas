@@ -237,9 +237,9 @@ async function ensureFunilExists(supabase, organizacaoId) {
 }
 
 async function getEntradaColumnId(supabase, funilId, organizacaoId) {
-  const SYSTEM_ORG_ID = 8;
+  const SYSTEM_ORG_ID = 1;
 
-  // 1. TENTA ACHAR A COLUNA GLOBAL "ENTRADA" (ORG 8)
+  // 1. TENTA ACHAR A COLUNA GLOBAL "ENTRADA" (ORG 1)
   let { data: colunaGlobal } = await supabase.from('colunas_funil').select('id').eq('nome', 'ENTRADA').eq('organizacao_id', SYSTEM_ORG_ID).maybeSingle();
   if (colunaGlobal) return colunaGlobal.id;
 
