@@ -75,8 +75,8 @@ export default function CategoriaFormModal({ isOpen, onClose, onSave, initialDat
 
                         <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
                             <button type="button" onClick={onClose} className="bg-gray-200 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-300 text-sm font-semibold">Cancelar</button>
-                            <button type="button" onClick={handleSubmit} disabled={isSaving} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-semibold disabled:bg-gray-400 flex items-center gap-2">
-                                {isSaving ? <><FontAwesomeIcon icon={faSpinner} spin /> Salvando...</> : 'Salvar Categoria'}
+                            <button type="button" onClick={handleSubmit} disabled={loading} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-semibold disabled:bg-gray-400 flex items-center gap-2">
+                                {loading ? <><FontAwesomeIcon icon={faSpinner} spin /> Salvando...</> : 'Salvar Categoria'}
                             </button>
                         </div>
                     </form>

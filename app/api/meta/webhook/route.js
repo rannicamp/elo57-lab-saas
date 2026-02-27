@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // Cliente Admin (Service Role) - Necessário para rodar em background
 const getSupabaseAdmin = () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SECRET_KEY; 
+    const supabaseKey = process.env.SUPABASE_SECRET_KEY;
     if (!supabaseUrl || !supabaseKey) return null;
     return createClient(supabaseUrl, supabaseKey, {
         auth: { persistSession: false }
@@ -15,24 +15,25 @@ const getSupabaseAdmin = () => {
 
 function sanitizePhone(phone) {
     if (!phone) return null;
-    let clean = phone.replace(/\D/g, ''); 
+    let clean = phone.replace(/\D/g, '');
     if (clean.length === 10 || clean.length === 11) {
         if (clean.startsWith('1') && clean.length === 11 && clean[2] !== '9') {
-             // Provavel EUA
+            // Provavel EUA
         } else {
-             clean = '55' + clean;
+            clean = '55' + clean;
         }
     }
     return clean;
 }
 
-// Busca a coluna "ENTRADA" do SISTEMA (Org 1)
+// Busca a coluna "ENTRADA" do SISTEMA (Org 8)
 async function getSystemEntryColumn(supabase) {
+    const SYSTEM_ORG_ID = 8;
     const { data: coluna } = await supabase
         .from('colunas_funil')
         .select('id')
-        .eq('nome', 'ENTRADA') 
-        .eq('organizacao_id', 1) // <--- ID DA ORGANIZAÇÃO DO SISTEMA
+        .eq('nome', 'ENTRADA')
+        .eq('organizacao_id', SYSTEM_ORG_ID) // <--- ID DA ORGANIZAÇÃO DO SISTEMA
         .limit(1)
         .single();
 
@@ -56,15 +57,15 @@ export async function GET(request) {
 export async function POST(request) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return new NextResponse(JSON.stringify({ status: 'error' }), { status: 500 });
-    
+
     try {
         const body = await request.json();
         const change = body.entry?.[0]?.changes?.[0];
 
         if (change?.field !== 'leadgen') return new NextResponse(JSON.stringify({ status: 'ignored' }), { status: 200 });
-        
+
         const { leadgen_id: leadId, page_id: pageId } = change.value;
-        
+
         // 🕵️‍♂️ INTELIGÊNCIA DO SISTEMA: Descobre TODAS as organizações conectadas a esta página
         const { data: integracoes, error: intError } = await supabase
             .from('integracoes_meta')
@@ -81,7 +82,7 @@ export async function POST(request) {
         const pageAccessToken = integracoes[0].access_token;
         const leadRes = await fetch(`https://graph.facebook.com/v20.0/${leadId}?access_token=${pageAccessToken}`);
         const leadDetails = await leadRes.json();
-        
+
         if (leadDetails.error) throw new Error(leadDetails.error.message);
 
         // Mapeia os campos da resposta do Facebook
@@ -89,7 +90,7 @@ export async function POST(request) {
         if (leadDetails.field_data) {
             leadDetails.field_data.forEach(f => { formMap[f.name] = f.values[0]; });
         }
-        
+
         const nomeLead = formMap.full_name || formMap.nome || 'Lead Meta';
         const emailLead = formMap.email || formMap.email_address;
         const phoneLead = formMap.phone_number || formMap.telefone;
@@ -101,7 +102,7 @@ export async function POST(request) {
         // 💾 O LAÇO DE MULTIPLICAÇÃO: Salva o contato para CADA organização da lista
         for (const integracao of integracoes) {
             const clienteOrgId = integracao.organizacao_id;
-            
+
             // O "PULO DO GATO": Carimbamos a org no ID do lead para não quebrar a regra UNIQUE do banco
             const uniqueLeadId = `${leadId}_${clienteOrgId}`;
 
@@ -111,7 +112,7 @@ export async function POST(request) {
                 .select('id')
                 .eq('meta_lead_id', uniqueLeadId)
                 .single();
-            
+
             if (existingLead) {
                 console.log(`Aviso: Lead já existe para a org ${clienteOrgId}, pulando...`);
                 continue; // Vai para a próxima organização da lista
@@ -140,14 +141,14 @@ export async function POST(request) {
                 const finalPhone = sanitizePhone(phoneLead);
                 if (finalPhone) await supabase.from('telefones').insert({ contato_id: newContact.id, telefone: finalPhone, organizacao_id: clienteOrgId });
             }
-            
+
             // 🎯 VINCULA AO FUNIL (Coluna do Sistema, Visível para o Cliente)
-            await supabase.from('contatos_no_funil').insert({ 
-                contato_id: newContact.id, 
+            await supabase.from('contatos_no_funil').insert({
+                contato_id: newContact.id,
                 coluna_id: systemColumnId,
                 organizacao_id: clienteOrgId // <--- A permissão de visualização do cliente!
             });
-            
+
             console.log(`SUCESSO: Lead ${newContact.id} criado para a Organização ${clienteOrgId} na Coluna Mestre.`);
         }
 
@@ -155,6 +156,6 @@ export async function POST(request) {
 
     } catch (e) {
         console.error('ERRO GERAL WEBHOOK:', e.message);
-        return NextResponse.json({ error: e.message }, { status: 500 }); 
+        return NextResponse.json({ error: e.message }, { status: 500 });
     }
 }
