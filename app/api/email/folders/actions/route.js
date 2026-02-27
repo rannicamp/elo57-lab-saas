@@ -4,7 +4,7 @@ import imapSimple from 'imap-simple';
 
 export async function POST(request) {
     const supabase = await createClient();
-
+    
     try {
         const body = await request.json();
         const { action, folderPath, accountId } = body;
@@ -19,7 +19,7 @@ export async function POST(request) {
         // 1. Busca a conta correta
         let query = supabase.from('email_configuracoes').select('*').eq('user_id', user.id);
         if (accountId) query = query.eq('id', accountId);
-
+        
         const { data: configs } = await query;
         const config = configs?.[0];
 
@@ -42,62 +42,50 @@ export async function POST(request) {
 
         try {
             if (action === 'delete') {
+                // --- PROTEÇÃO INTELIGENTE (CORRIGIDA) ---
+                // Só bloqueia se o nome for EXATAMENTE igual a uma pasta de sistema.
+                // Isso permite pastas como "Entrada de Projetos" ou "Lixeira Temporária".
                 const pathUpper = folderPath.toUpperCase();
+                
+                // Lista exata de nomes proibidos (padrão IMAP e Português)
                 const forbiddenExact = [
-                    'INBOX', 'CAIXA DE ENTRADA', 'ENTRADA',
+                    'INBOX', 'CAIXA DE ENTRADA', 'ENTRADA', 
                     'TRASH', 'LIXEIRA', 'ITENS EXCLUIDOS', 'BIN', 'DELETED',
-                    'SENT', 'ENVIADOS', 'ITENS ENVIADOS',
+                    'SENT', 'ENVIADOS', 'ITENS ENVIADOS', 
                     'JUNK', 'SPAM', 'LIXO ELETRONICO', 'QUARANTINE',
                     'DRAFTS', 'RASCUNHOS'
                 ];
 
+                // Verifica se é exatamente igual OU se é uma subpasta direta do sistema (ex: INBOX/Algo proibido)
+                // Mas permite deletar subpastas criadas pelo usuário.
+                
+                // Na dúvida, vamos confiar mais no servidor, bloqueando apenas o óbvio.
                 if (forbiddenExact.includes(pathUpper)) {
                     throw new Error(`A pasta "${folderPath}" é protegida pelo sistema.`);
                 }
 
+                // Tenta deletar. Se o servidor do e-mail não deixar (ex: pasta com filhos ou protegida lá), ele vai retornar erro e nós mostramos.
                 await connection.delBox(folderPath);
-
-                // Excluir também do cache local para não perder sincronia
-                await supabase.from('email_messages_cache')
-                    .delete()
-                    .eq('account_id', config.id)
-                    .eq('folder_path', folderPath);
-            }
+            } 
             else if (action === 'empty') {
                 await connection.openBox(folderPath);
+                // Busca todas as mensagens
                 const messages = await connection.search(['ALL'], { bodies: ['HEADER'], markSeen: false });
                 if (messages.length > 0) {
                     const uids = messages.map(m => m.attributes.uid);
+                    // Marca como deletado
                     await connection.addFlags(uids, '\\Deleted');
-                    try { await connection.imap.expunge(uids); } catch (e) { }
-
-                    // Atualiza cache local
-                    await supabase.from('email_messages_cache')
-                        .update({ flags: ['\\Deleted'] })
-                        .eq('account_id', config.id)
-                        .eq('folder_path', folderPath)
-                        .in('uid', uids);
+                    try { await connection.imap.expunge(uids); } catch (e) {}
                 }
-                await connection.closeBox();
-            }
+                await connection.closeBox(); 
+            } 
             else if (action === 'markAllRead') {
-                // ESTRATÉGIA OFFLINE-FIRST NATIVA
-                // 1. Atualizar o Supabase IMEADIATAMENTE (isso zera o contador na tela no mesmo milissegundo)
-                await supabase.from('email_messages_cache')
-                    .update({ is_read: true })
-                    .eq('account_id', config.id)
-                    .eq('folder_path', folderPath)
-                    .eq('is_read', false);
-
-                // 2. Disparar o comando para o provedor de Email em Lote Rápido
-                // Sem pedir cabeçalhos de volta (que é o que causa o grande gargalo de Timeout)
                 await connection.openBox(folderPath);
-
-                // Pega apenas as numerações exatas rapidinho
-                const results = await connection.search(['UNSEEN'], { markSeen: true });
-                // Ao passar markSeen: true, o próprio comando de busca já diz pro servidor mudar a flag lá.
-                // Não precisa rodar addFlags() manualmente depois de baixar uma lista gigante.
-
+                const messages = await connection.search(['UNSEEN'], { bodies: ['HEADER'], markSeen: false });
+                if (messages.length > 0) {
+                    const uids = messages.map(m => m.attributes.uid);
+                    await connection.addFlags(uids, '\\Seen');
+                }
                 await connection.closeBox();
             } else {
                 throw new Error('Ação inválida');
@@ -108,9 +96,9 @@ export async function POST(request) {
         } catch (opError) {
             console.error(`Erro na operação ${action}:`, opError);
             // Melhora a mensagem de erro para o usuário
-            const msg = opError.message.includes('NONEXISTENT') ? 'Pasta não encontrada.' :
-                opError.message.includes('CANNOT') ? 'O servidor bloqueou essa ação.' :
-                    opError.message;
+            const msg = opError.message.includes('NONEXISTENT') ? 'Pasta não encontrada.' : 
+                        opError.message.includes('CANNOT') ? 'O servidor bloqueou essa ação.' : 
+                        opError.message;
             return NextResponse.json({ error: msg }, { status: 500 });
         } finally {
             connection.end();

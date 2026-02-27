@@ -2,13 +2,42 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import imapSimple from 'imap-simple';
 
-const checkCondition = (message, condition) => {
-    const textToCheck = message[condition.campo]?.toLowerCase() || '';
+// ... (Funções decodeHeaderValue e checkCondition MANTIDAS IGUAIS AO ANTERIOR) ...
+const decodeHeaderValue = (str) => {
+    if (!str) return '';
+    if (Array.isArray(str)) str = str[0];
+    if (!str || typeof str !== 'string') return ''; 
+    const unfolded = str.replace(/\r\n\s+/g, ' ');
+    const encodedWordRegex = /=\?([\w-]+)\?([BbQq])\?([^\?]*)\?=/g;
+    if (!encodedWordRegex.test(unfolded)) return unfolded.replace(/^"|"$/g, '').trim();
+    return unfolded.replace(encodedWordRegex, (match, charset, encoding, content) => {
+        try {
+            if (encoding.toUpperCase() === 'B') return Buffer.from(content, 'base64').toString('utf8');
+            else if (encoding.toUpperCase() === 'Q') {
+                let decoded = content.replace(/_/g, ' ');
+                decoded = decoded.replace(/=([0-9A-F]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
+                try { return decodeURIComponent(escape(decoded)); } catch { return decoded; }
+            }
+            return match;
+        } catch (err) { return match; }
+    });
+};
+
+const checkCondition = (email, condition) => {
+    const part = email.parts.find(p => p.which && p.which.toUpperCase().includes('HEADER'));
+    const headers = part?.body || {};
+    const rawFrom = headers.from || headers.FROM || headers.From || [];
+    const rawSubject = headers.subject || headers.SUBJECT || headers.Subject || [];
+    const rawTo = headers.to || headers.TO || headers.To || [];
+    const fieldMap = {
+        'from': decodeHeaderValue(rawFrom).toLowerCase(),
+        'subject': decodeHeaderValue(rawSubject).toLowerCase(),
+        'to': decodeHeaderValue(rawTo).toLowerCase()
+    };
+    const textToCheck = fieldMap[condition.campo] || '';
     const valueToCheck = (condition.valor || '').toLowerCase();
-
-    if (!valueToCheck) return true;
+    if (!valueToCheck) return true; 
     if (!textToCheck) return false;
-
     switch (condition.operador) {
         case 'contains': return textToCheck.includes(valueToCheck);
         case 'not_contains': return !textToCheck.includes(valueToCheck);
@@ -19,122 +48,78 @@ const checkCondition = (message, condition) => {
     }
 };
 
-async function processAccountBatchDB(config, regras, cursor, limit, supabase) {
+async function processAccountBatch(config, regras, depth, limit) {
+    let connection = null;
     let stats = { matched: 0, moved: 0, totalMessages: 0, hasMore: false };
 
     try {
-        // 1. Pega o total de mensagens desta conta na INBOX local
-        const { count } = await supabase
-            .from('email_messages_cache')
-            .select('*', { count: 'exact', head: true })
-            .eq('account_id', config.id)
-            .ilike('folder_path', '%INBOX%');
+        const imapConfig = {
+            imap: {
+                user: config.imap_user || config.email,
+                password: config.senha_app,
+                host: config.imap_host,
+                port: config.imap_port || 993,
+                tls: true,
+                authTimeout: 20000,
+                tlsOptions: { rejectUnauthorized: false }
+            },
+        };
 
-        stats.totalMessages = count || 0;
+        connection = await imapSimple.connect(imapConfig);
+        const box = await connection.openBox('INBOX', { readOnly: false });
+        stats.totalMessages = box.messages.total;
 
-        if (stats.totalMessages === 0 || cursor >= stats.totalMessages) {
+        if (stats.totalMessages === 0) {
+            connection.end();
             return stats;
         }
 
-        // 2. Busca o lote de mensagens usando Range (muito mais rápido que IMAP Fetch)
-        const { data: messages } = await supabase
-            .from('email_messages_cache')
-            .select('uid, folder_path, subject, from_text, to_text, account_id, id, flags')
-            .eq('account_id', config.id)
-            .ilike('folder_path', '%INBOX%')
-            .order('uid', { ascending: false })
-            .range(cursor, cursor + limit - 1);
+        let currentEnd = stats.totalMessages - depth;
+        let currentStart = Math.max(1, currentEnd - limit + 1);
 
-        if (!messages || messages.length === 0) {
+        if (currentEnd < 1) {
+            connection.end();
             return stats;
         }
+        
+        stats.hasMore = currentStart > 1;
 
-        stats.hasMore = (cursor + limit) < stats.totalMessages;
+        const fetchRange = `${currentStart}:${currentEnd}`;
+        const fetchOptions = { bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)'], struct: true, markSeen: false };
 
-        const actionsToPerform = [];
+        const messages = await connection.search([fetchRange], fetchOptions);
+        messages.sort((a, b) => b.attributes.uid - a.attributes.uid);
 
-        // 3. Avalia regras LOCALMENTE
         for (const message of messages) {
-            const messageAdapter = {
-                subject: message.subject,
-                from: message.from_text,
-                to: message.to_text
-            };
-
             let ruleApplied = false;
             for (const regra of regras) {
-                if (ruleApplied) break;
-
+                if (ruleApplied) break; 
                 try {
-                    if (regra.condicoes.length > 0 && regra.condicoes.every(cond => checkCondition(messageAdapter, cond))) {
+                    if (regra.condicoes.length > 0 && regra.condicoes.every(cond => checkCondition(message, cond))) {
+                        const uid = message.attributes.uid;
                         for (const acao of regra.acoes) {
-                            actionsToPerform.push({
-                                uid: message.uid,
-                                action: acao.tipo,
-                                folder: acao.pasta
-                            });
+                            if (acao.tipo === 'move' && acao.pasta) {
+                                await connection.moveMessage(uid, acao.pasta);
+                                stats.moved++;
+                            } else if (acao.tipo === 'markRead') {
+                                await connection.addFlags(uid, '\\Seen');
+                            } else if (acao.tipo === 'delete') {
+                                try { await connection.moveMessage(uid, 'TRASH'); } 
+                                catch { await connection.addFlags(uid, '\\Deleted'); }
+                                stats.moved++;
+                            }
                         }
                         stats.matched++;
                         ruleApplied = true;
                     }
-                } catch (err) { }
-            }
-        }
-
-        // 4. Conecta no IMAP APENAS se houver mensagens para Mover/Deletar
-        // Isso economiza incontáveis segundos de conexão atoa.
-        if (actionsToPerform.length > 0) {
-            const imapConfig = {
-                imap: {
-                    user: config.imap_user || config.email,
-                    password: config.senha_app,
-                    host: config.imap_host,
-                    port: config.imap_port || 993,
-                    tls: true,
-                    authTimeout: 20000,
-                    tlsOptions: { rejectUnauthorized: false }
-                },
-            };
-
-            let connection = null;
-            try {
-                connection = await imapSimple.connect(imapConfig);
-                await connection.openBox('INBOX', { readOnly: false });
-
-                for (const task of actionsToPerform) {
-                    try {
-                        if (task.action === 'move' && task.folder) {
-                            await connection.moveMessage(task.uid, task.folder);
-                            stats.moved++;
-                            await supabase.from('email_messages_cache').update({ folder_path: task.folder }).eq('account_id', config.id).eq('uid', task.uid);
-                        } else if (task.action === 'markRead') {
-                            await connection.addFlags(task.uid, '\\Seen');
-                            await supabase.from('email_messages_cache').update({ is_read: true }).eq('account_id', config.id).eq('uid', task.uid);
-                        } else if (task.action === 'delete') {
-                            try {
-                                await connection.moveMessage(task.uid, 'TRASH');
-                                await supabase.from('email_messages_cache').update({ folder_path: 'TRASH' }).eq('account_id', config.id).eq('uid', task.uid);
-                            }
-                            catch {
-                                await connection.addFlags(task.uid, '\\Deleted');
-                                await supabase.from('email_messages_cache').update({ flags: ['\\Deleted'] }).eq('account_id', config.id).eq('uid', task.uid);
-                            }
-                            stats.moved++;
-                        }
-                    } catch (actionError) {
-                        console.error(`Falha deep scan na msg ${task.uid}:`, actionError);
-                    }
-                }
-            } catch (connectionError) {
-                console.error(`Erro conectar IMAP deep scan conta ${config.email}:`, connectionError.message);
-            } finally {
-                if (connection) try { connection.end(); } catch (e) { }
+                } catch (err) {}
             }
         }
     } catch (e) {
-        console.error(`Erro deep scan local conta ${config.email}:`, e.message);
+        console.error(`Erro deep scan conta ${config.email}:`, e.message);
+    } finally {
+        if (connection) try { connection.end(); } catch (e) {}
     }
-
     return stats;
 }
 
@@ -143,8 +128,8 @@ export async function POST(request) {
 
     try {
         const body = await request.json();
-        const { ruleId, cursor = 0, limit = 50 } = body;
-        const currentCursor = parseInt(cursor);
+        const { ruleId, cursor = 0, limit = 50 } = body; 
+        const currentDepth = parseInt(cursor);
 
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
@@ -183,7 +168,7 @@ export async function POST(request) {
         const results = await Promise.all(accountsToProcess.map(cfg => {
             // Filtra regras que pertencem a essa conta (ou regras sem dono/legado)
             const regrasDestaConta = regras.filter(r => !r.account_id || r.account_id === cfg.id);
-            return processAccountBatchDB(cfg, regrasDestaConta, currentCursor, limit, supabase);
+            return processAccountBatch(cfg, regrasDestaConta, currentDepth, limit);
         }));
 
         const totalMessagesMax = Math.max(...results.map(r => r.totalMessages || 0));
@@ -191,11 +176,11 @@ export async function POST(request) {
         const moved = results.reduce((acc, r) => acc + (r.moved || 0), 0);
         const anyAccountHasMore = results.some(r => r.hasMore);
 
-        return NextResponse.json({
-            success: true,
-            done: !anyAccountHasMore,
-            nextCursor: currentCursor + limit,
-            totalMessages: totalMessagesMax,
+        return NextResponse.json({ 
+            success: true, 
+            done: !anyAccountHasMore, 
+            nextCursor: currentDepth + limit, 
+            totalMessages: totalMessagesMax, 
             matched,
             moved
         });

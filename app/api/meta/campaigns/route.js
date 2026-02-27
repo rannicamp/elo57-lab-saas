@@ -1,46 +1,40 @@
+//app\api\meta\campaigns\route.js
+
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { FacebookAdsApi, AdAccount } from 'facebook-nodejs-business-sdk';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
-export async function GET(request) {
+// Esta API irá receber o ID da Conta de Anúncio e buscará as campanhas
+export async function POST(request) {
+  const session = await getServerSession(authOptions);
+
+  if (!session || !session.accessToken) {
+    return NextResponse.json({ error: 'Não autorizado. Conecte sua conta da Meta.' }, { status: 401 });
+  }
+
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    // Se não tiver usuário, retorna erro, mas se for erro de lógica, retorna vazio
-    if (!user) return NextResponse.json({ error: '401' }, { status: 401 });
-
-    const { data: userData } = await supabase.from('usuarios').select('organizacao_id').eq('id', user.id).single();
-    
-    // Busca integração
-    const { data: integracao } = await supabase
-      .from('integracoes_meta')
-      .select('access_token, ad_account_id')
-      .eq('organizacao_id', userData.organizacao_id)
-      .single();
-
-    // BLINDAGEM: Se não tiver token OU não tiver conta de anúncios salva, retorna vazio (200 OK)
-    // Isso evita o erro 500 na inicialização
-    if (!integracao?.access_token || !integracao?.ad_account_id) {
-      return NextResponse.json({ campaigns: [], adsets: [] }); 
+    const { adAccountId } = await request.json();
+    if (!adAccountId) {
+      return NextResponse.json({ error: 'O ID da Conta de Anúncio é obrigatório.' }, { status: 400 });
     }
 
-    const api = FacebookAdsApi.init(integracao.access_token);
-    const adAccountId = integracao.ad_account_id.startsWith('act_') ? integracao.ad_account_id : `act_${integracao.ad_account_id}`;
-    const account = new AdAccount(adAccountId);
+    const accessToken = session.accessToken;
+    // Montamos a URL usando o ID da conta de anúncio para buscar as campanhas
+    // Pedimos os campos: nome da campanha, status (ativa/pausada), e o objetivo
+    const url = `https://graph.facebook.com/v20.0/${adAccountId}/campaigns?fields=name,status,objective&access_token=${accessToken}`;
 
-    // Busca com limite para ser rápido
-    const campaigns = await account.getCampaigns(['name', 'status'], { limit: 100 });
-    const adsets = await account.getAdSets(['name', 'status', 'campaign_id'], { limit: 100 });
+    const response = await fetch(url);
+    const data = await response.json();
 
-    return NextResponse.json({
-        campaigns: campaigns.map(c => ({ id: c.id, name: c.name, status: c.status })),
-        adsets: adsets.map(a => ({ id: a.id, name: a.name, campaign_id: a.campaign_id, status: a.status }))
-    });
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'Falha ao buscar campanhas da Meta.');
+    }
+
+    // Retorna a lista de campanhas encontradas
+    return NextResponse.json(data.data || []);
 
   } catch (error) {
-    console.error('Erro campanhas (Ignorado):', error.message);
-    // Em caso de erro fatal (ex: token expirado), retorna vazio para não travar a tela
-    return NextResponse.json({ campaigns: [], adsets: [] });
+    console.error('Erro na API /api/meta/campaigns:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

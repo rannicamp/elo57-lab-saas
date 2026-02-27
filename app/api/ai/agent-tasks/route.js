@@ -12,38 +12,36 @@ export async function POST(req) {
     const { messages, contextData, today, currentPlan } = body;
 
     const genAI = new GoogleGenerativeAI(apiKey);
-
-    // SCHEMA: Permite que a IA converse CASO não preencha as activities
+    
+    // SCHEMA: Forçamos a estrutura exata que o banco espera para Eventos vs Tarefas
     const schema = {
-      description: "Plano estruturado do assistente",
+      description: "Plano de ação para criação de atividades e eventos",
       type: "object",
       properties: {
-        thought_process: { type: "string", description: "Avalie se você já tem dados suficientes (o que e quando) para criar o plano ou se precisa conversar com o usuário." },
-        message: { type: "string", description: "Uma mensagem conversacional para o usuário (Ex: 'Entendi, para que dia é essa obra?', 'Legal, criei as 3 tarefas!')." },
+        thought_process: { type: "string", description: "Analise: O usuário quer um Evento (hora marcada) ou Tarefa (duração em dias)?" },
+        clarification_needed: { type: "boolean", description: "True se faltar a HORA para um Evento." },
+        question_to_user: { type: "string", description: "A pergunta caso falte a hora." },
         activities: {
           type: "array",
-          description: "Deixe vazio se estiver apenas tirando dúvidas. Preencha apenas quando tiver certeza das tarefas e eventos.",
           items: {
             type: "object",
             properties: {
               temp_id: { type: "integer" },
-              id: { type: "integer", description: "ID real do banco de dados (se já existir)." },
-              action: { type: "string", description: "Ação a ser feita com a tarefa: CREATE, UPDATE, DELETE ou KEEP." },
-
+              
               // TIPO: A decisão mais importante
-              tipo_atividade: { type: "string", description: "Tipo da Atividade: Evento ou Tarefa" },
-
+              tipo_atividade: { type: "string", enum: ["Evento", "Tarefa"] },
+              
               nome: { type: "string" },
               descricao: { type: "string" },
-              status: { type: "string", description: "Deve ser 'Não Iniciado'", default: "Não Iniciado" },
-
+              status: { type: "string", enum: ["Não Iniciado"], default: "Não Iniciado" },
+              
               // DATA (Comum a ambos)
               data_inicio_prevista: { type: "string", description: "YYYY-MM-DD" },
-
+              
               // CAMPOS EXCLUSIVOS DE EVENTO (Hora Marcada)
               hora_inicio: { type: "string", description: "HH:MM:SS - OBRIGATÓRIO PARA EVENTOS. Null para Tarefas." },
               duracao_horas: { type: "number", description: "Duração em horas (ex: 1, 2.5). OBRIGATÓRIO PARA EVENTOS." },
-
+              
               // CAMPOS EXCLUSIVOS DE TAREFA (Dias de Obra)
               duracao_dias: { type: "number", description: "Duração em dias (ex: 1, 3, 0.5). OBRIGATÓRIO PARA TAREFAS. Para Eventos envie 0." },
 
@@ -57,7 +55,7 @@ export async function POST(req) {
           }
         }
       },
-      required: ["message"]
+      required: ["thought_process", "clarification_needed", "activities"]
     };
 
     const model = genAI.getGenerativeModel({
@@ -69,69 +67,43 @@ export async function POST(req) {
       systemInstruction: `
         VOCÊ É UM ASSISTENTE DE GESTÃO DO STUDIO 57.
         Data de hoje: ${today}
-        Você está conversando com: ${contextData.nome_usuario}
-        
-        Sua personalidade: Seja extremamente cortês, educado, e sempre se dirija ao usuário pelo nome dele de forma amigável.
-        
-        SUA NOVA REGRA DE OURO É "FLEXIBILIDADE":
-        O usuário possui uma tela com o Chat na esquerda e os Cartões de Atividade na direita.
-        NUNCA SUGIRA TAREFAS EM FORMATO DE TEXTO DENTRO DA MENSAGEM DO CHAT.
-        
-        1. SE O USUÁRIO FOR VAGO OU SE VOCÊ PRECISA DE INFORMAÇÕES VITAIS:
-           Você PODE e DEVE fazer perguntas para ele. (Ex: "Quantos dias dura esse projeto?", "Qual o horário da reunião amanhã?").
-           Neste caso, envie sua pergunta no campo 'message' e retorne o array 'activities' VAZIO ([]).
 
-        2. SE O USUÁRIO DEU CONTEXTO SUFICIENTE (ex: "Criar 3 tarefas de projeto", "Reunião amanhã às 16"):
-           Envie imediatamente o rascunho no array 'activities'.
-           Use a 'message' para explicar o que acabou de aparecer na direita (Ex: "Criei o rascunho das 3 atividades aqui ao lado!").
-           Você tem permissão para usar textos genéricos (como data de hoje) se faltarem apenas pequenos detalhes secundários.
+        SUA MISSÃO É DISTINGUIR "EVENTOS" DE "TAREFAS". SÃO COISAS DIFERENTES.
 
-        --- GERENCIAMENTO DE ESTADO (CUD) ---
-        Se o usuário te enviou um "Plano Atual" (via JSON na mensagem) e pediu alterações:
-        1. Para tarefas que continuam iguais, devolva elas com as mesmas informações e action: "KEEP" ou "UPDATE".
-        2. Para tarefas que tiveram a data ou qualquer detalhe alterado, MANTENHA O MESMO 'id' e use action: "UPDATE".
-        3. Para tarefas que o usuário mandou cancelar ou remover, MANTENHA O MESMO 'id' e use action: "DELETE".
-        4. Para novas tarefas adicionadas na lista, envie sem 'id' e use action: "CREATE".
-
-        REGRAS DO ARRAY ACTIVITIES QUANDO FOR PREENCHÊ-LO:
         --- MODO 1: EVENTO (Compromisso na Agenda) ---
-        - Se for evento (Reunião, Visita, tem hora marcada):
-          'tipo_atividade': "Evento", 'hora_inicio': HH:MM, 'duracao_dias': 0, 'duracao_horas': (1 a X).
+        - Gatilhos: "Reunião", "Visita", "Vistoria", "Almoço", "Call", "Encontro", ou se o usuário disser uma HORA (ex: "às 14h").
+        - Regras:
+          1. Defina 'tipo_atividade': "Evento".
+          2. **OBRIGATÓRIO:** Preencha 'hora_inicio' (HH:MM). Se o usuário não disse a hora, marque 'clarification_needed': true e PERGUNTE.
+          3. 'duracao_horas': Padrão 1.
+          4. 'duracao_dias': DEVE SER 0. Eventos não duram dias no cronograma, duram horas.
 
         --- MODO 2: TAREFA (Serviço de Obra/Escritório) ---
-        - Se for tarefa solta para o dia (Comprar, Pintar):
-          'tipo_atividade': "Tarefa", 'hora_inicio': null, 'duracao_dias': (maior que 0), 'duracao_horas': null.
+        - Gatilhos: "Pintar", "Comprar", "Instalar", "Ligar para", "Enviar e-mail", "Fazer relatório".
+        - Regras:
+          1. Defina 'tipo_atividade': "Tarefa".
+          2. 'hora_inicio': DEVE SER null. Tarefas não têm hora marcada, são do dia.
+          3. 'duracao_dias': Padrão 1. Use 0.5 para meio dia.
+          4. 'duracao_horas': DEVE SER null.
 
-        --- CONTEXTO DO BANCO E AGENDA (IMPORTANTE) ---
-        Agenda Atual de ${contextData.nome_usuario} (Próximos 30 dias): ${JSON.stringify(contextData.agenda_atual || [])}
-        *Se o usuário pedir uma tarefa ou evento, cruze os dados com essa agenda acima. NÃO marque eventos no mesmo dia/hora de algo que já existe na agenda dele, a menos que ele insista. Se houver conflito, diga no chat: "Vi que você já tem X nesse horário, que tal marcarmos para as Yh?"*
-        
+        --- CONTEXTO DO BANCO ---
         Obras Disponíveis: ${JSON.stringify(contextData.empreendimentos || [])}
-        Funcionários Gerais: ${JSON.stringify(contextData.funcionarios || [])}
+        Funcionários: ${JSON.stringify(contextData.funcionarios || [])}
 
         --- RESPONSÁVEL ---
-        - Se não citado nome, use 'funcionario_id': "SELF". Se citado, busque o ID.
+        - Se não citado nome, use 'funcionario_id': "SELF".
+        - Se citado, busque o ID.
       `
     });
 
-    // Converter mensagens para o formato do Google
-    const formattedHistory = messages.slice(0, -1).map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }));
-
     const lastUserMessage = messages[messages.length - 1].content;
-    let finalPrompt = lastUserMessage;
+    let prompt = lastUserMessage;
 
-    if (currentPlan && currentPlan.length > 0) {
-      finalPrompt = `O usuário disse: "${lastUserMessage}". Seu objetivo agora é Modificar/Manter o plano DE ACORDO com a vontade dele, ou apenas responder a pergunta que ele fez sem deletar as tarefas. Plano Atual no painel direito: ${JSON.stringify(currentPlan)}`;
+    if (currentPlan) {
+      prompt = `EDITE este plano existente com base no pedido: "${lastUserMessage}". Plano Atual: ${JSON.stringify(currentPlan)}`;
     }
 
-    const chat = model.startChat({
-      history: formattedHistory
-    });
-
-    const result = await chat.sendMessage(finalPrompt);
+    const result = await model.generateContent(prompt);
     return new Response(result.response.text(), {
       headers: { "Content-Type": "application/json" },
     });

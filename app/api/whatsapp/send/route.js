@@ -12,15 +12,10 @@ export async function POST(request) {
 
     try {
         const body = await request.json();
-
+        
         // Desestruturação dos dados recebidos
-        // 🔥 ADICIONADO: 'organizacao_id' aqui
-        let { to, type, text, link, caption, filename, templateName, languageCode, components, contact_id, custom_content, location, organizacao_id } = body;
-
-        // Trava de Segurança
-        if (!organizacao_id) {
-            return NextResponse.json({ error: 'ID da organização não fornecido para o envio.' }, { status: 400 });
-        }
+        // Adicionei 'location' aqui
+        let { to, type, text, link, caption, filename, templateName, languageCode, components, contact_id, custom_content, location } = body;
 
         // --- 1. LIMPEZA E VALIDAÇÃO DO TELEFONE ---
         const cleanPhone = to ? to.toString().replace(/\D/g, '') : '';
@@ -29,15 +24,14 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Número de telefone inválido ou vazio.' }, { status: 400 });
         }
 
-        // --- 2. CONFIGURAÇÃO (AGORA BLINDADA) ---
+        // --- 2. CONFIGURAÇÃO ---
         const { data: config, error: configError } = await supabaseAdmin
             .from('configuracoes_whatsapp')
             .select('*')
-            .eq('organizacao_id', organizacao_id) // 🔥 O CADEADO ESTÁ AQUI! Busca só a config desta empresa
             .single();
 
         if (configError || !config) {
-            return NextResponse.json({ error: 'Configuração do WhatsApp não encontrada para esta organização.' }, { status: 500 });
+            return NextResponse.json({ error: 'Configuração do WhatsApp não encontrada no banco.' }, { status: 500 });
         }
 
         const token = config.whatsapp_permanent_token;
@@ -57,7 +51,7 @@ export async function POST(request) {
         if (type === 'text') {
             payload.text = { body: text, preview_url: true };
             messageContentForDb = text;
-        }
+        } 
         else if (type === 'template') {
             payload.template = {
                 name: templateName,
@@ -65,19 +59,19 @@ export async function POST(request) {
                 components: components || []
             };
             messageContentForDb = custom_content || `Template: ${templateName}`;
-        }
+        } 
         else if (type === 'image') {
             payload.image = { link: link, caption: caption || '' };
             messageContentForDb = caption || 'Imagem enviada';
-        }
+        } 
         else if (type === 'document') {
             payload.document = { link: link, caption: caption || '', filename: filename || 'documento.pdf' };
             messageContentForDb = caption || filename || 'Documento enviado';
-        }
+        } 
         else if (type === 'audio') {
             payload.audio = { link: link };
             messageContentForDb = 'Áudio enviado';
-        }
+        } 
         else if (type === 'video') {
             payload.video = { link: link, caption: caption || '' };
             messageContentForDb = caption || 'Vídeo enviado';
@@ -111,7 +105,6 @@ export async function POST(request) {
         let finalContactId = contact_id;
         if (!finalContactId) {
             try {
-                // Aqui também é recomendado, no futuro, passar o organizacao_id para buscar apenas contatos da empresa
                 const { data } = await supabaseAdmin.rpc('find_contact_smart', { phone_input: cleanPhone });
                 finalContactId = data;
             } catch (e) {
@@ -122,7 +115,7 @@ export async function POST(request) {
         // --- 6. TRATAMENTO DE ERRO ---
         if (!response.ok) {
             console.error('[WhatsApp Send Error] Falha Meta:', JSON.stringify(responseData));
-
+            
             const errorMessage = responseData.error?.message || 'Erro desconhecido na Meta API';
             const errorPayload = responseData;
 
@@ -140,31 +133,13 @@ export async function POST(request) {
                 media_url: link || null
             });
 
-            return NextResponse.json({
+            return NextResponse.json({ 
                 error: errorMessage,
-                details: responseData
+                details: responseData 
             }, { status: response.status });
         }
 
-        // --- 7. CRIAÇÃO/ATUALIZAÇÃO DA CONVERSA (MÁGICA DO CHAT) ---
-        const { data: conversationData, error: convError } = await supabaseAdmin
-            .from('whatsapp_conversations')
-            .upsert({
-                phone_number: cleanPhone,
-                contato_id: finalContactId,
-                organizacao_id: config.organizacao_id,
-                updated_at: new Date().toISOString(),
-                last_direction: 'outbound',
-                last_status: 'sent'
-            }, { onConflict: 'phone_number' })
-            .select()
-            .single();
-
-        if (convError) console.error('[WhatsApp Send] Erro Upsert Conversation:', convError);
-
-        const conversationRecordId = conversationData?.id;
-
-        // --- 8. SUCESSO (INSERE A MENSAGEM NO BANCO COM O VÍNCULO) ---
+        // --- 7. SUCESSO ---
         const newMessageId = responseData.messages?.[0]?.id;
 
         if (newMessageId) {
@@ -179,30 +154,11 @@ export async function POST(request) {
                 status: 'sent',
                 raw_payload: JSON.stringify(payload),
                 organizacao_id: config.organizacao_id,
-                conversation_record_id: conversationRecordId, // 🔥 ELO DA CORRENTE FEITO!
                 media_url: link || null,
                 error_message: null
             });
 
             if (dbError) console.error('[WhatsApp Send] Erro DB:', dbError);
-
-            // --- 9. ATUALIZA ÚLTIMA MENSAGEM NA CONVERSA ---
-            if (!dbError && conversationRecordId) {
-                // Como não temos o ID retornado do insert (porque não fizemos .select()), 
-                // vamos atualizar a conversa com o ID da nova mensagem.
-                const { data: insertedMsg } = await supabaseAdmin
-                    .from('whatsapp_messages')
-                    .select('id')
-                    .eq('message_id', newMessageId)
-                    .single();
-
-                if (insertedMsg) {
-                    await supabaseAdmin
-                        .from('whatsapp_conversations')
-                        .update({ last_message_id: insertedMsg.id })
-                        .eq('id', conversationRecordId);
-                }
-            }
         }
 
         return NextResponse.json(responseData, { status: 200 });
