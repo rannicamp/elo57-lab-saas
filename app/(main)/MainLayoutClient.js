@@ -11,6 +11,7 @@ import PoliticasModal from '../../components/configuracoes/PoliticasModal';
 import AtividadeModal from '../../components/atividades/AtividadeModal';
 import { createClient } from '../../utils/supabase/client';
 import { toast } from 'sonner';
+import TermsUpdateEnforcer from '@/components/compliance/TermsUpdateEnforcer';
 
 import '@fortawesome/fontawesome-svg-core/styles.css';
 import { config } from '@fortawesome/fontawesome-svg-core';
@@ -32,7 +33,7 @@ function MainLayoutContent({ children }) {
 
     const { user, isProprietario, loading: authLoading, organizacao_id } = useAuth();
     const sidebarPosition = user?.sidebar_position || 'left';
-    
+
     // Referência para evitar o "piscar" do carregamento se o usuário já estiver na tela
     const hasLoadedOnce = useRef(false);
     if (user && !authLoading) {
@@ -99,7 +100,7 @@ function MainLayoutContent({ children }) {
 
     const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
     const closeSidebar = () => setIsSidebarOpen(false);
-    
+
     if (authLoading && !hasLoadedOnce.current) {
         return <div className="flex items-center justify-center h-screen bg-white">Carregando...</div>;
     }
@@ -108,7 +109,7 @@ function MainLayoutContent({ children }) {
 
     // --- LÓGICA DE LAYOUT CORRIGIDA PELO DEVONILDO ---
     const isLateral = sidebarPosition === 'left' || sidebarPosition === 'right';
-    
+
     const mainStyles = (() => {
         // Altura do cabeçalho calculada dinamicamente
         const topPadding = isCotacoesBarVisible ? '89px' : '65px';
@@ -126,7 +127,7 @@ function MainLayoutContent({ children }) {
             };
         } else if (sidebarPosition === 'top') {
             return { paddingTop: '140px', paddingBottom: '20px' };
-        } else { 
+        } else {
             return { paddingTop: '80px', paddingBottom: '80px' };
         }
     })();
@@ -135,8 +136,8 @@ function MainLayoutContent({ children }) {
         <>
             <Header toggleSidebar={toggleSidebar} />
             <Sidebar isOpen={isSidebarOpen} closeSidebar={closeSidebar} isAdmin={isProprietario} />
-            
-            <main 
+
+            <main
                 className={`${isCaixaDeEntrada ? 'flex-1 w-full relative overflow-hidden flex flex-col' : 'flex-grow p-4 transition-all duration-300'}`}
                 style={mainStyles}
             >
@@ -146,14 +147,14 @@ function MainLayoutContent({ children }) {
             </main>
 
             {isGlobalActivityModalOpen && (
-                <AtividadeModal 
-                    isOpen={isGlobalActivityModalOpen} 
-                    onClose={() => setIsGlobalActivityModalOpen(false)} 
-                    onActivityAdded={() => { setIsGlobalActivityModalOpen(false); toast.success('Atividade rápida criada!'); }} 
-                    funcionarios={modalData.funcionarios} 
-                    allEmpreendimentos={empreendimentos} 
-                    allEmpresas={modalData.empresas} 
-                /> 
+                <AtividadeModal
+                    isOpen={isGlobalActivityModalOpen}
+                    onClose={() => setIsGlobalActivityModalOpen(false)}
+                    onActivityAdded={() => { setIsGlobalActivityModalOpen(false); toast.success('Atividade rápida criada!'); }}
+                    funcionarios={modalData.funcionarios}
+                    allEmpreendimentos={empreendimentos}
+                    allEmpresas={modalData.empresas}
+                />
             )}
         </>
     );
@@ -169,6 +170,7 @@ export default function MainLayoutClient({ children }) {
     return (
         <LayoutProvider>
             <EmpreendimentoProvider>
+                <TermsUpdateEnforcer />
                 <PoliticasModal />
                 <MainLayoutContent>{children}</MainLayoutContent>
             </EmpreendimentoProvider>

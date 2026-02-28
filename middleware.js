@@ -82,11 +82,20 @@ export async function middleware(req) {
     // --- REGRAS DE ACESSO POR CARGO (Acesso restrito) ---
     const { data: profile } = await supabase
       .from('usuarios')
-      .select('funcao_id')
+      .select('funcao_id, is_superadmin')
       .eq('id', user.id)
       .single()
 
     const funcaoId = profile?.funcao_id
+    const isSuperAdmin = profile?.is_superadmin
+
+    // REGRA DE SUPER ADMIN (ACESSO AO /admin)
+    if (path.startsWith('/admin')) {
+      if (!isSuperAdmin) {
+        // Ocultar a área de backoffice mandando ele pra home do sistema dele
+        return NextResponse.redirect(new URL('/painel', req.url))
+      }
+    }
 
     // REGRA DO PROJETISTA (ID 4)
     if (funcaoId === 4) {
