@@ -34,7 +34,6 @@
     "@uppy/react": "^5.1.1",
     "@uppy/webcam": "^5.1.0",
     "@uppy/xhr-upload": "^5.1.1",
-    "belvo": "^0.28.0",
     "browser-image-compression": "^2.0.2",
     "date-fns": "^4.1.0",
     "extenso": "^2.1.0",
