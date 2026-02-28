@@ -7,7 +7,6 @@ import Header from '@/components/shared/Header';
 import { LayoutProvider } from '../../contexts/LayoutContext';
 import { EmpreendimentoProvider, useEmpreendimento } from '../../contexts/EmpreendimentoContext';
 import { useAuth } from '../../contexts/AuthContext';
-import PoliticasModal from '../../components/configuracoes/PoliticasModal';
 import AtividadeModal from '../../components/atividades/AtividadeModal';
 import { createClient } from '../../utils/supabase/client';
 import { toast } from 'sonner';
@@ -171,7 +170,6 @@ export default function MainLayoutClient({ children }) {
         <LayoutProvider>
             <EmpreendimentoProvider>
                 <TermsUpdateEnforcer />
-                <PoliticasModal />
                 <MainLayoutContent>{children}</MainLayoutContent>
             </EmpreendimentoProvider>
         </LayoutProvider>
