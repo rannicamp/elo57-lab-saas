@@ -116,8 +116,8 @@ export default function TermsUpdateEnforcer() {
             }
 
         } catch (error) {
-            console.error("Erro ao assinar termos:", error);
-            alert("Não foi possível salvar seu aceite. Tente novamente ou chame o suporte.");
+            console.error("Erro ao assinar termos:", JSON.stringify(error));
+            alert(`Não foi possível salvar. Motivo: ${error.message || error.details || JSON.stringify(error)}`);
         } finally {
             setProcessing(false);
         }
