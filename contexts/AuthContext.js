@@ -11,7 +11,7 @@ const AuthContext = createContext();
 export function AuthProvider({ children }) {
     const supabase = createClient();
     const router = useRouter();
-    
+
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [isProprietario, setIsProprietario] = useState(false);
@@ -51,7 +51,7 @@ export function AuthProvider({ children }) {
             await forceLogout();
             return;
         }
-        
+
         const combinedUser = {
             ...currentUser,
             ...profileData,
@@ -59,11 +59,11 @@ export function AuthProvider({ children }) {
 
         setUser(combinedUser);
         setOrganizacaoId(profileData.organizacao_id);
-        
+
         const userRole = profileData?.funcoes;
-        const isUserProprietario = userRole?.nome_funcao === 'Proprietário';
+        const isUserProprietario = userRole?.nome_funcao === 'Proprietário' || profileData?.is_superadmin === true;
         setIsProprietario(isUserProprietario);
-        
+
         if (isUserProprietario) {
             const allResources = ['empresas', 'empreendimentos', 'funcionarios', 'atividades', 'rdo', 'usuarios', 'permissoes', 'financeiro', 'ponto', 'orcamento', 'pedidos', 'crm', 'contatos', 'simulador', 'contratos', 'caixa-de-entrada', 'anuncios', 'dashboard', 'funil'];
             const allPermissions = allResources.reduce((acc, resource) => {
@@ -79,6 +79,7 @@ export function AuthProvider({ children }) {
             }, {});
             setPermissions(userPermissions);
         } else {
+            console.warn("Usuário sem função. Limpando permissões.", profileData);
             setPermissions({});
         }
         setLoading(false);
@@ -94,7 +95,7 @@ export function AuthProvider({ children }) {
             subscription.unsubscribe();
         };
     }, [supabase, fetchProfileAndPermissions]);
-    
+
     const refreshAuthUser = useCallback(async () => {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
@@ -107,24 +108,24 @@ export function AuthProvider({ children }) {
         if (isProprietario) return true;
         return permissions[recurso]?.[permissao] || false;
     };
-    
+
     // =================================================================================
     // AQUI ESTÁ A CORREÇÃO MÁGICA
     // O PORQUÊ: Adicionamos a propriedade 'userData' que é um espelho da 'user'.
     // Isso garante que componentes antigos que usam 'user' continuem funcionando,
     // e o novo ContatoForm que usa 'userData' também funcione. É a solução mais segura.
     // =================================================================================
-    const value = { 
-        user, 
+    const value = {
+        user,
         userData: user, // <-- A CORREÇÃO ESTÁ AQUI
-        loading, 
-        isProprietario, 
-        permissions, 
-        hasPermission, 
-        organizacao_id, 
-        refreshAuthUser 
+        loading,
+        isProprietario,
+        permissions,
+        hasPermission,
+        organizacao_id,
+        refreshAuthUser
     };
-    
+
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

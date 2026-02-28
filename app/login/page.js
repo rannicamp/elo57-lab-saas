@@ -23,7 +23,7 @@ export default function LoginPage() {
     setError(null);
     setIsLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data: authData, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -32,7 +32,21 @@ export default function LoginPage() {
       setError(error.message);
       setIsLoading(false);
     } else {
-      router.push('/painel');
+      let targetUrl = '/painel'; // Padrão
+
+      if (authData?.user?.id) {
+        const { data: profile } = await supabase
+          .from('usuarios')
+          .select('is_superadmin')
+          .eq('id', authData.user.id)
+          .single();
+
+        if (profile?.is_superadmin) {
+          targetUrl = '/admin';
+        }
+      }
+
+      router.push(targetUrl);
       router.refresh();
     }
   };
@@ -43,13 +57,14 @@ export default function LoginPage() {
         <div className="bg-white p-8 rounded-lg shadow-md">
           <div className="mb-8 flex justify-center">
             {/* Ajustei o width/height para garantir que a proporção fique boa */}
-            <Image 
-                src={logoUrl} 
-                alt="Logo Studio 57" 
-                width={200} 
-                height={60} 
-                priority 
-                className="object-contain" // Garante que a imagem não distorça
+            <Image
+              src={logoUrl}
+              alt="Logo Studio 57"
+              width={200}
+              height={60}
+              priority
+              style={{ width: "auto", height: "auto" }}
+              className="object-contain" // Garante que a imagem não distorça
             />
           </div>
 
@@ -77,7 +92,7 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label htmlFor="password"className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Senha
               </label>
               <div className="mt-1">
@@ -92,11 +107,11 @@ export default function LoginPage() {
                   className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
               </div>
-              
+
               <div className="flex items-center justify-end mt-2">
                 <div className="text-sm">
-                  <Link 
-                    href="/recuperar-senha" 
+                  <Link
+                    href="/recuperar-senha"
                     className="font-medium text-blue-600 hover:text-blue-500"
                   >
                     Esqueceu sua senha?
