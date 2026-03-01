@@ -25,6 +25,7 @@ export async function middleware(req) {
     '/register',
     '/cadastro-corretor',
     '/upload',
+    '/politicas',
     '/sitemap.xml',
     '/robots.txt'
   ]
