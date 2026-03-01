@@ -2,65 +2,46 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
-import { revalidatePath } from 'next/cache'
 
-const ORGANIZACAO_ID = 2; // Studio 57
-
-// Buscar o histórico de termos
-export async function getTermHistory() {
+/**
+ * Busca as versões atuais das políticas aplicadas a todos os usuários
+ */
+export async function getActivePlatformPolicies() {
   const supabase = await createClient()
-  
+
   const { data, error } = await supabase
-    .from('termos_uso')
+    .from('politicas_plataforma')
     .select('*')
-    .eq('organizacao_id', ORGANIZACAO_ID)
-    .eq('tipo', 'CORRETOR')
-    .order('versao', { ascending: false })
+    .eq('is_active', true)
+    .order('tipo', { ascending: true })
 
   if (error) {
-    console.error('Erro ao buscar histórico:', error)
+    console.error('Erro ao buscar políticas ativas:', error)
     return []
   }
-  
+
   return data
 }
 
-// Salvar uma NOVA versão do termo
-export async function saveNewTermVersion(conteudoHtml) {
+/**
+ * Busca o histórico de aceites do usuário autenticado (Auditoria)
+ */
+export async function getMyAcceptanceHistory() {
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  // 1. Descobrir qual é a última versão
-  const { data: lastTerm } = await supabase
-    .from('termos_uso')
-    .select('versao')
-    .eq('organizacao_id', ORGANIZACAO_ID)
-    .eq('tipo', 'CORRETOR')
-    .order('versao', { ascending: false })
-    .limit(1)
-    .single()
+  if (!user) return []
 
-  const nextVersion = (lastTerm?.versao || 0) + 1
-
-  // 2. Desativar todos os anteriores (Opcional, mas bom para garantir)
-  await supabase
-    .from('termos_uso')
-    .update({ ativo: false })
-    .eq('organizacao_id', ORGANIZACAO_ID)
-    .eq('tipo', 'CORRETOR')
-
-  // 3. Inserir o novo termo como ATIVO
-  const { error } = await supabase.from('termos_uso').insert({
-    tipo: 'CORRETOR',
-    conteudo: conteudoHtml,
-    versao: nextVersion,
-    ativo: true,
-    organizacao_id: ORGANIZACAO_ID
-  })
+  const { data, error } = await supabase
+    .from('usuario_aceite_politicas')
+    .select('*, politicas_plataforma(titulo, versao)')
+    .eq('usuario_id', user.id)
+    .order('data_aceite', { ascending: false })
 
   if (error) {
-    return { error: error.message }
+    console.error('Erro ao buscar histórico de aceites:', error)
+    return []
   }
 
-  revalidatePath('/configuracoes/politicas')
-  return { success: true, version: nextVersion }
+  return data
 }

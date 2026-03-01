@@ -2,114 +2,196 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getTermHistory, saveNewTermVersion } from './actions'
-import { toast } from 'sonner'
+import { getActivePlatformPolicies, getMyAcceptanceHistory } from './actions'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faSave, faHistory, faFileContract, faSpinner } from '@fortawesome/free-solid-svg-icons'
+import {
+    faFileContract,
+    faPrint,
+    faShieldHalved,
+    faHistory,
+    faCircleCheck,
+    faSpinner
+} from '@fortawesome/free-solid-svg-icons'
 
 export default function PoliticasPage() {
-  const [content, setContent] = useState('')
-  const [history, setHistory] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
+    const [politicas, setPoliticas] = useState([])
+    const [historico, setHistorico] = useState([])
+    const [activeTab, setActiveTab] = useState(null)
+    const [isLoading, setIsLoading] = useState(true)
 
-  // Carregar dados iniciais
-  useEffect(() => {
-    loadData()
-  }, [])
+    useEffect(() => {
+        async function loadData() {
+            setIsLoading(true)
+            const [politicasData, historyData] = await Promise.all([
+                getActivePlatformPolicies(),
+                getMyAcceptanceHistory()
+            ])
 
-  async function loadData() {
-    setIsLoading(true)
-    const data = await getTermHistory()
-    setHistory(data)
-    
-    // Se tiver histórico, joga o mais recente no editor
-    if (data && data.length > 0) {
-        setContent(data[0].conteudo)
+            setPoliticas(politicasData)
+            setHistorico(historyData)
+
+            if (politicasData && politicasData.length > 0) {
+                setActiveTab(politicasData[0].id)
+            }
+            setIsLoading(false)
+        }
+        loadData()
+    }, [])
+
+    const handlePrint = () => {
+        window.print()
     }
-    setIsLoading(false)
-  }
 
-  async function handleSave() {
-    if (!content.trim()) return toast.error('O termo não pode estar vazio.')
-    
-    setIsSaving(true)
-    const result = await saveNewTermVersion(content)
-    setIsSaving(false)
-
-    if (result?.success) {
-        toast.success(`Versão ${result.version} publicada com sucesso!`)
-        loadData() // Recarrega a lista
-    } else {
-        toast.error('Erro ao salvar: ' + result?.error)
+    if (isLoading) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-500">
+                <FontAwesomeIcon icon={faSpinner} spin className="text-3xl text-emerald-600" />
+                <p className="animate-pulse">Sincronizando documentação legal...</p>
+            </div>
+        )
     }
-  }
 
-  return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                <FontAwesomeIcon icon={faFileContract} className="text-blue-600" />
-                Políticas e Termos de Uso
-            </h1>
-            <p className="text-gray-500">Gerencie o contrato de parceria aceito pelos corretores.</p>
-        </div>
-        <button
-            onClick={handleSave}
-            disabled={isSaving || isLoading}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2 transition-colors"
-        >
-            {isSaving ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faSave} />}
-            Publicar Nova Versão
-        </button>
-      </div>
+    const politicaAtiva = politicas.find(p => p.id === activeTab)
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* COLUNA DA ESQUERDA: EDITOR */}
-        <div className="lg:col-span-2 bg-white p-4 rounded-lg shadow border border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Editor do Contrato (HTML Permitido)</label>
-            <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="w-full h-[500px] p-4 border border-gray-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                placeholder="<h1>Termos de Uso</h1><p>Digite aqui o contrato...</p>"
-            />
-            <p className="text-xs text-gray-400 mt-2">Dica: Use tags HTML simples como &lt;h1&gt;, &lt;p&gt;, &lt;b&gt; para formatar.</p>
-        </div>
+    return (
+        <div className="p-6 max-w-5xl mx-auto space-y-6">
+            {/* Cabeçalho da Central (Escondido na impressão) */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <FontAwesomeIcon icon={faShieldHalved} className="text-emerald-600" />
+                        Políticas e Segurança de Dados
+                    </h1>
+                    <p className="text-slate-500">Consulte as diretrizes vigentes e o seu histórico de aceites.</p>
+                </div>
 
-        {/* COLUNA DA DIREITA: HISTÓRICO */}
-        <div className="bg-white p-4 rounded-lg shadow border border-gray-200 h-fit">
-            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <FontAwesomeIcon icon={faHistory} className="text-gray-500" />
-                Histórico de Versões
-            </h3>
-            
-            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                {isLoading ? (
-                    <p className="text-gray-500 text-center py-4">Carregando...</p>
-                ) : history.length === 0 ? (
-                    <p className="text-gray-500 text-sm">Nenhuma versão encontrada.</p>
-                ) : (
-                    history.map((term) => (
-                        <div 
-                            key={term.id} 
-                            onClick={() => setContent(term.conteudo)}
-                            className={`p-3 rounded-md border cursor-pointer transition-all ${term.ativo ? 'border-green-200 bg-green-50' : 'border-gray-100 hover:bg-gray-50'}`}
-                        >
-                            <div className="flex justify-between items-start">
-                                <span className="font-bold text-sm text-gray-700">Versão {term.versao}</span>
-                                {term.ativo && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Atual</span>}
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1">
-                                {new Date(term.created_at).toLocaleDateString('pt-BR')} às {new Date(term.created_at).toLocaleTimeString('pt-BR')}
-                            </p>
-                        </div>
-                    ))
+                {politicaAtiva && (
+                    <button
+                        onClick={handlePrint}
+                        className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+                    >
+                        <FontAwesomeIcon icon={faPrint} />
+                        Imprimir Documento
+                    </button>
                 )}
             </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+
+                {/* Lateral: Navegação e Histórico (Escondido na impressão) */}
+                <div className="lg:col-span-1 space-y-6 print:hidden">
+
+                    {/* Abas de Tipos */}
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                        <div className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Documentos Ativos</h3>
+                        </div>
+                        <div className="p-2 space-y-1">
+                            {politicas.map(p => (
+                                <button
+                                    key={p.id}
+                                    onClick={() => setActiveTab(p.id)}
+                                    className={`w-full text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${activeTab === p.id
+                                            ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                                            : 'text-slate-600 hover:bg-slate-50'
+                                        }`}
+                                >
+                                    <FontAwesomeIcon icon={faFileContract} className={activeTab === p.id ? 'text-emerald-600' : 'text-slate-400'} />
+                                    <div className="overflow-hidden">
+                                        <p className="truncate text-sm">{p.titulo}</p>
+                                        <p className="text-[10px] opacity-70">Versão {p.versao}</p>
+                                    </div>
+                                </button>
+                            ))}
+                            {politicas.length === 0 && (
+                                <p className="p-4 text-xs text-slate-400 italic">Nenhuma política publicada no momento.</p>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Mini Histórico de Aceites */}
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                        <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Seus Aceites</h3>
+                            <FontAwesomeIcon icon={faHistory} className="text-slate-400 text-xs" />
+                        </div>
+                        <div className="p-3 space-y-3 max-h-[300px] overflow-y-auto">
+                            {historico.map(h => (
+                                <div key={h.id} className="border-l-2 border-emerald-500 pl-3 py-1">
+                                    <p className="text-xs font-bold text-slate-800 truncate">
+                                        {h.politicas_plataforma?.titulo || h.tipo}
+                                    </p>
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                        <FontAwesomeIcon icon={faCircleCheck} className="text-[10px] text-emerald-500" />
+                                        <p className="text-[10px] text-slate-500">
+                                            v{h.versao} em {new Date(h.data_aceite).toLocaleDateString('pt-BR')}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                            {historico.length === 0 && (
+                                <p className="text-[10px] text-slate-400 italic">Sem registros de assinaturas.</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Área Principal: Conteúdo do Documento */}
+                <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm print:border-none print:shadow-none min-h-[600px] flex flex-col">
+                    {politicaAtiva ? (
+                        <div className="p-8 md:p-12 print:p-0">
+                            {/* Cabeçalho de Impressão (Só aparece no papel) */}
+                            <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-8">
+                                <h1 className="text-2xl font-bold uppercase tracking-tighter">Studio 57 - Documentação Legal</h1>
+                                <p className="text-sm">Protocolo de Segurança e Compliance Digital</p>
+                            </div>
+
+                            <article className="prose prose-slate max-w-none prose-emerald">
+                                <div className="flex items-center justify-between mb-8 border-b border-slate-100 pb-4">
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-slate-900 m-0">{politicaAtiva.titulo}</h2>
+                                        <p className="text-slate-500 text-sm mt-1">Versão {politicaAtiva.versao} • Publicado em {new Date(politicaAtiva.data_publicacao).toLocaleDateString('pt-BR')}</p>
+                                    </div>
+                                    <div className="text-right hidden sm:block">
+                                        <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md uppercase">Vigente</span>
+                                    </div>
+                                </div>
+
+                                <div className="text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                    {politicaAtiva.conteudo}
+                                </div>
+                            </article>
+
+                            {/* Rodapé de Impressão */}
+                            <div className="mt-12 pt-8 border-t border-slate-100 text-center space-y-2">
+                                <p className="text-[10px] text-slate-400">
+                                    Este documento foi gerado eletronicamente pela plataforma Studio 57.
+                                    Para fins de validação, consulte o painel de histórico de aceites no sistema.
+                                </p>
+                                <p className="text-[10px] text-slate-300">
+                                    Impresso em: {new Date().toLocaleString('pt-BR')}
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center italic">
+                            <FontAwesomeIcon icon={faFileContract} className="text-4xl mb-4 opacity-20" />
+                            <p>Selecione um documento na lateral para visualizar o conteúdo.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Estilos para impressão limpa */}
+            <style jsx global>{`
+                @media print {
+                    @page { margin: 2cm; }
+                    body { background: white !important; }
+                    .print\\:hidden { display: none !important; }
+                    nav, aside, header, footer { display: none !important; }
+                    main { padding: 0 !important; margin: 0 !important; }
+                }
+            `}</style>
         </div>
-      </div>
-    </div>
-  )
+    )
 }
