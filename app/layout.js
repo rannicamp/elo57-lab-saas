@@ -1,15 +1,10 @@
 ﻿import { Inter } from 'next/font/google';
 // ✅ AQUI SIM devem estar esses imports:
-import './globals.css'; 
+import './globals.css';
 import { Providers } from './providers';
-import QueryProvider from './QueryProvider';
 
 import { Toaster } from 'sonner';
 import Script from 'next/script';
-
-// Seus contextos
-import { AuthProvider } from '@/contexts/AuthContext';
-import { OrganizationProvider } from '@/contexts/OrganizationContext';
 
 import ServiceWorkerRegistrar from '@/components/shared/ServiceWorkerRegistrar';
 // Se este arquivo não existir, comente a linha abaixo para testar
@@ -37,15 +32,9 @@ export default function RootLayout({ children }) {
         {/* Registro do PWA */}
         <ServiceWorkerRegistrar />
 
-        <AuthProvider>
-          <OrganizationProvider>
-            <QueryProvider>
-              <Providers>
-                {children}
-              </Providers>
-            </QueryProvider>
-          </OrganizationProvider>
-        </AuthProvider>
+        <Providers>
+          {children}
+        </Providers>
 
         <Toaster richColors position="top-right" />
       </body>
