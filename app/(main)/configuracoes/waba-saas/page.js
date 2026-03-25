@@ -1,125 +1,153 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Script from 'next/script';
-import { MessageCircle, ArrowRight, Loader2, CheckCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import { FaWhatsapp, FaServer, FaCheckCircle, FaSpinner } from 'react-icons/fa';
 import { toast } from 'sonner';
 
-export default function WabaSaasTestPage() {
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState(null);
+export default function WabaSaasConfigPage() {
+    const { data: session } = useSession();
+    const [isSdkLoaded, setIsSdkLoaded] = useState(false);
+    const [isConnecting, setIsConnecting] = useState(false);
 
-    // Na arquitetura, definimos o APP WABA Oficial (o mesmo aprovado na Meta)
-    const fbAppId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID_WA || '1459952825742829';
-
+    // Carrega o SDK do Facebook assim que a página renderizar
     useEffect(() => {
-        window.fbAsyncInit = function () {
-            window.FB.init({
-                appId: fbAppId,
-                cookie: true,
-                xfbml: true,
-                version: 'v21.0'
-            });
-            console.log("[WABA SaaS Lab] Facebook SDK Inicializado!");
-        };
-    }, [fbAppId]);
-
-    const handleConnectClick = () => {
-        if (typeof window === 'undefined' || !window.FB) {
-            toast.error("O Facebook SDK ainda não carregou.");
+        if (window.FB) {
+            setIsSdkLoaded(true);
             return;
         }
 
-        setLoading(true);
-
-        window.FB.login((response) => {
-            if (response.authResponse) {
-                const accessToken = response.authResponse.accessToken;
-                toast.success("Token OAUTH recebido! Trocando no Backend...");
-                
-                trocarTokenNoServidor(accessToken);
-            } else {
-                setLoading(false);
-                toast.error("Login cancelado ou não concluído.");
-            }
-        }, {
-            // As permissões rigorosas que habilitamos na Meta
-            scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
-            extras: { feature: 'whatsapp_embedded_signup' }
-        });
-    };
-
-    const trocarTokenNoServidor = async (accessToken) => {
-        try {
-            // Usamos a flag test=true para indicar no backend que estamos injetando isto no laboratório
-            const res = await fetch('/api/meta/waba-oauth', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ accessToken, isTestMode: true })
+        window.fbAsyncInit = function () {
+            window.FB.init({
+                appId: process.env.NEXT_PUBLIC_FACEBOOK_APP_ID_WA, // Usando o App Oficial
+                cookie: true,
+                xfbml: true,
+                version: 'v22.0',
             });
-            
-            const data = await res.json();
-            
-            if (!res.ok) throw new Error(data.error || 'Erro na troca de token local');
-            
-            setResult(data);
-            toast.success("Integração WABA completa! Dados retornados com sucesso.");
-        } catch (error) {
-            console.error(error);
-            toast.error(`Erro: ${error.message}`);
-        } finally {
-            setLoading(false);
+            setIsSdkLoaded(true);
+            console.log("✅ Facebook SDK Carregado e Pronto.");
+        };
+
+        (function (d, s, id) {
+            var js, fjs = d.getElementsByTagName(s)[0];
+            if (d.getElementById(id)) { return; }
+            js = d.createElement(s); js.id = id;
+            js.src = "https://connect.facebook.net/pt_BR/sdk.js";
+            fjs.parentNode.insertBefore(js, fjs);
+        }(document, 'script', 'facebook-jssdk'));
+    }, []);
+
+    const handleConnectWhatsApp = () => {
+        if (!isSdkLoaded) {
+            toast.error("O SDK do Facebook ainda está carregando...");
+            return;
         }
+
+        setIsConnecting(true);
+
+        window.FB.login(
+            async (response) => {
+                if (response.authResponse) {
+                    const accessToken = response.authResponse.accessToken;
+                    console.log("🔵 Token OAUTH Temporário obtido com sucesso!");
+                    
+                    try {
+                        toast.loading("Negociando acesso profundo com a Meta...");
+                        
+                        const res = await fetch('/api/meta/waba-oauth', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                accessToken,
+                                // Envia qual organização está conectando isso
+                                organizacaoId: session?.user?.organizacao_id 
+                            })
+                        });
+
+                        const data = await res.json();
+                        toast.dismiss();
+
+                        if (res.ok) {
+                            toast.success("✅ WhatsApp Comercial conectado com sucesso!");
+                            setIsConnecting(false);
+                        } else {
+                            toast.error(data.error || "Falha ao conectar WABA.");
+                            setIsConnecting(false);
+                        }
+
+                    } catch (error) {
+                        toast.dismiss();
+                        toast.error("Erro na comunicação com o servidor.");
+                        setIsConnecting(false);
+                    }
+                } else {
+                    toast.error("Você cancelou a autenticação da Meta.");
+                    setIsConnecting(false);
+                }
+            },
+            {
+                // Escopos exigidos pela Meta para o Embedded Signup funcionar 
+                scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
+                extras: {
+                    feature: 'whatsapp_embedded_signup'
+                }
+            }
+        );
     };
 
     return (
-        <div className="p-8 max-w-4xl mx-auto animate-in fade-in duration-300">
-            <Script
-                src="https://connect.facebook.net/pt_BR/sdk.js"
-                strategy="lazyOnload"
-                crossOrigin="anonymous"
-            />
-            
-            <div className="bg-white border rounded-3xl p-10 shadow-sm text-center">
-                <div className="w-20 h-20 bg-[#25D366] rounded-2xl flex items-center justify-center text-white shadow-xl shadow-[#25D366]/30 mx-auto mb-6">
-                    <MessageCircle size={36} strokeWidth={2} />
-                </div>
-                
-                <h1 className="text-3xl font-bold text-gray-900 mb-3">Laboratório WABA SaaS</h1>
-                <p className="text-gray-500 mb-10 max-w-xl mx-auto leading-relaxed">
-                    Central isolada de desenvolvimento para integrar o Embedded Signup da Meta. 
-                    Esta página fará a troca do Token Oauth temporário pelo Long-Lived e atrelará o Phone_Number_Id no BD.
+        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-8 animate-fade-in pb-32">
+            <div className="mb-8">
+                <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
+                    <span className="bg-gradient-to-tr from-green-500 to-green-600 text-white p-2.5 rounded-xl shadow-lg shadow-green-500/20">
+                        <FaWhatsapp size={22} className="drop-shadow-sm" />
+                    </span>
+                    Instalador WhatsApp Multi-Tenant
+                </h1>
+                <p className="mt-3 text-gray-500 text-lg leading-relaxed max-w-2xl">
+                    Ambiente isolado para testes do <strong className="text-gray-700">Embedded Signup</strong>. 
+                    Esta página conectará seu App Oficial e armazenará o Handshake definitivo de forma segmentada.
                 </p>
+            </div>
 
-                {!result ? (
-                    <button
-                        onClick={handleConnectClick}
-                        disabled={loading}
-                        className="bg-[#25D366] hover:bg-[#1ebd5a] text-white font-bold py-4 px-8 rounded-xl flex flex-row items-center gap-3 justify-center w-full max-w-sm mx-auto transition-transform active:scale-95 disabled:opacity-50 shadow-md"
-                    >
-                        {loading ? <Loader2 className="animate-spin" size={24} /> : <><MessageCircle size={24} /> Simular Login Meta <ArrowRight size={20} /></>}
-                    </button>
-                ) : (
-                    <div className="text-left bg-gray-50 p-6 rounded-2xl border border-gray-100 mt-6 relative overflow-hidden animate-in zoom-in-95">
-                        <div className="absolute top-0 right-0 p-4">
-                            <CheckCircle size={32} className="text-[#25D366]" />
-                        </div>
-                        <h3 className="font-bold text-lg mb-4 text-[#25D366]">Sucesso! Resposta do Backend (/api/meta/waba-oauth):</h3>
-                        <pre className="text-xs font-mono bg-gray-900 text-green-400 p-4 rounded-xl overflow-x-auto">
-                            {JSON.stringify(result, null, 2)}
-                        </pre>
+            {/* Painel de Status */}
+            <div className="bg-white rounded-3xl p-8 border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-green-50/50 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+                
+                <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between relative z-10">
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Conectar Empresa</h3>
+                        <p className="text-gray-500 text-sm max-w-md">
+                            Ao clicar em conectar, uma janela da Meta se abrirá para que você selecione 
+                            (ou crie) a WABA e o Número de Telefone desta Organização.
+                        </p>
                         
-                        <div className="mt-6 flex justify-center">
-                            <button
-                                onClick={() => setResult(null)}
-                                className="text-sm font-bold text-gray-500 hover:text-gray-800 transition-colors"
-                            >
-                                Resetar e Tentar Novamente
-                            </button>
+                        <div className="mt-4 flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-gray-50 text-gray-600 rounded-full inline-flex border border-gray-200">
+                            <span className={`w-2 h-2 rounded-full ${isSdkLoaded ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                            {isSdkLoaded ? "Facebook SDK Online (v22.0)" : "Carregando Meta Graph SDK..."}
                         </div>
                     </div>
-                )}
+
+                    <button
+                        onClick={handleConnectWhatsApp}
+                        disabled={!isSdkLoaded || isConnecting}
+                        className="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-xl font-semibold shadow-lg shadow-green-600/30 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group active:scale-95 whitespace-nowrap"
+                    >
+                        {isConnecting ? (
+                            <>
+                                <FaSpinner className="animate-spin" size={20} />
+                                Autenticando...
+                            </>
+                        ) : (
+                            <>
+                                <FaWhatsapp size={20} className="group-hover:scale-110 transition-transform" />
+                                Integrar WhatsApp Business
+                            </>
+                        )}
+                    </button>
+                </div>
             </div>
+
         </div>
     );
 }
