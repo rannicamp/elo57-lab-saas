@@ -74,7 +74,7 @@ export default function WhatsappButton({ initialData, organizacaoId }) {
             }
         }, {
             // As permissões rigorosas necessárias para o WhatsApp Business
-            scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
+            scope: 'whatsapp_business_management,whatsapp_business_messaging',
             extras: { feature: 'whatsapp_embedded_signup' }
         });
     };

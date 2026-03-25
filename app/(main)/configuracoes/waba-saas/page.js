@@ -87,7 +87,7 @@ export default function WabaSaasConfigPage() {
             },
             {
                 // Escopos exigidos pela Meta para o Embedded Signup funcionar 
-                scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
+                scope: 'whatsapp_business_management,whatsapp_business_messaging',
                 extras: {
                     feature: 'whatsapp_embedded_signup'
                 }
