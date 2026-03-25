@@ -135,18 +135,15 @@ export const getMessages = async (supabase, organizacaoId, contatoId) => {
 export const markMessagesAsRead = async (supabase, organizacaoId, contatoId) => {
     if (!organizacaoId || !contatoId) return;
 
-    await supabase
-        .from('whatsapp_conversations')
-        .update({ unread_count: 0 })
-        .eq('organizacao_id', organizacaoId)
-        .eq('contato_id', contatoId);
-        
-    await supabase
-        .from('whatsapp_messages')
-        .update({ is_read: true })
-        .eq('organizacao_id', organizacaoId)
-        .eq('contato_id', contatoId)
-        .eq('is_read', false);
+    try {
+        await fetch('/api/whatsapp/mark-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contact_id: contatoId, organizacao_id: organizacaoId })
+        });
+    } catch (err) {
+        console.error("Erro ao marcar como lida:", err);
+    }
 };
 
 // --- FUNÇÃO NOVA: VERIFICAR SE O WHATSAPP ESTÁ CONFIGURADO (GATEKEEPER) ---

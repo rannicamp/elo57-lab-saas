@@ -175,10 +175,7 @@ const fetchContactProfileData = async (supabase, contatoId, organizacaoId) => {
         .select(`
             *,
             telefones(*),
-            emails(*),
-            anuncio:meta_ad_id(id, nome),
-            adset:meta_adset_id(id, nome),
-            campanha:meta_campaign_id(id, nome)
+            emails(*)
         `) 
         .eq('id', contatoId)
         .single();

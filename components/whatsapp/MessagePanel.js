@@ -111,7 +111,7 @@ export default function MessagePanel({ contact, onBack }) {
             if (!contact?.contato_id || !organizacaoId) return;
             await fetch('/api/whatsapp/mark-read', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contact_id: contact.contato_id, organizacaoId: organizacaoId })
+                body: JSON.stringify({ contact_id: contact.contato_id, organizacao_id: organizacaoId })
             });
         },
         onSuccess: () => {
