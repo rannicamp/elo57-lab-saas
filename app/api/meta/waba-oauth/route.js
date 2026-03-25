@@ -86,13 +86,15 @@ export async function POST(req) {
             .from('configuracoes_whatsapp')
             .upsert({
                 organizacao_id: organizacaoId,
+                empresa_id: organizacaoId, // Corrigindo a Restrição NOT-NULL do Banco!
                 whatsapp_permanent_token: longLivedToken,
                 whatsapp_phone_number_id: phoneNumberId, // AGORA SIM! Webhook vai encontrar!
                 whatsapp_business_account_id: wabaId,
             }, { onConflict: 'organizacao_id' });
 
         if (configError) {
-            console.log("Atenção, o Config Error falhou, mas a integração Meta ocorreu", configError);
+            console.error("ERRO CRÍTICO NO BANCO (Configurações WhatsApp):", configError);
+            return NextResponse.json({ error: 'Falha letal ao criar a ponte de roteamento no Banco de Dados.' }, { status: 500 });
         }
 
         return NextResponse.json({ 
