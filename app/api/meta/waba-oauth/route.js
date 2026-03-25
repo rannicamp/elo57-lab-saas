@@ -81,21 +81,29 @@ export async function POST(req) {
             throw new Error("Falha ao injetar Token na Tabela de Integrações.");
         }
 
-        // 5. PERSISTÊNCIA: Motor de Envios e Webhook
+        // 5. Busca uma Empresa válida para satisfazer a Chave Estrangeira da Tabela Configurações WhatsApp
+        const { data: empresa } = await supabase
+            .from('cadastro_empresa')
+            .select('id')
+            .eq('organizacao_id', organizacaoId)
+            .limit(1)
+            .single();
+
+        if (!empresa) {
+            console.error("ERRO: Nenhuma empresa salva para a Organização ", organizacaoId);
+            return NextResponse.json({ error: 'Crie ao menos uma Empresa (Matriz) no sistema antes de conectar o WhatsApp.' }, { status: 400 });
+        }
+
+        // 6. PERSISTÊNCIA: Motor de Envios e Webhook
         const { error: configError } = await supabase
             .from('configuracoes_whatsapp')
             .upsert({
                 organizacao_id: organizacaoId,
-                empresa_id: organizacaoId, // Corrigindo a Restrição NOT-NULL do Banco!
+                empresa_id: empresa.id, // ID real da Empresa para satisfazer a restrição
                 whatsapp_permanent_token: longLivedToken,
                 whatsapp_phone_number_id: phoneNumberId, // AGORA SIM! Webhook vai encontrar!
                 whatsapp_business_account_id: wabaId,
-            }, { onConflict: 'organizacao_id' });
-
-        if (configError) {
-            console.error("ERRO CRÍTICO NO BANCO (Configurações WhatsApp):", configError);
-            return NextResponse.json({ error: 'Falha letal ao criar a ponte de roteamento no Banco de Dados.' }, { status: 500 });
-        }
+            }, { onConflict: 'empresa_id' }); // A constraint do Banco que diz se o registro deve ser atualizado ou inserido
 
         return NextResponse.json({ 
             success: true, 
