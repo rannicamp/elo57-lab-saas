@@ -19,7 +19,7 @@ export async function POST(req) {
 
         // 1. O Token que o SDK do Frontend pega morre rápido (1-2h). 
         // Aqui usamos nosso App Secret para pedir à Meta um Long-Lived Token (60 dias ou Infinito).
-        const exchangeUrl = \`https://graph.facebook.com/v22.0/oauth/access_token?grant_type=fb_exchange_token&client_id=\${appId}&client_secret=\${appSecret}&fb_exchange_token=\${accessToken}\`;
+        const exchangeUrl = `https://graph.facebook.com/v22.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${accessToken}`;
         
         const exchangeRes = await fetch(exchangeUrl);
         const exchangeData = await exchangeRes.json();
@@ -33,7 +33,7 @@ export async function POST(req) {
         console.log("✅ Long-Lived Token Gerado com Sucesso!");
 
         // 2. Extraímos no Debug da Meta qual o ID de Usuário e WABA atrelados a essa permissão.
-        const debugTokenUrl = \`https://graph.facebook.com/v22.0/debug_token?input_token=\${longLivedToken}&access_token=\${appId}|\${appSecret}\`;
+        const debugTokenUrl = `https://graph.facebook.com/v22.0/debug_token?input_token=${longLivedToken}&access_token=${appId}|${appSecret}`;
         const debugRes = await fetch(debugTokenUrl);
         const debugData = await debugRes.json();
         
