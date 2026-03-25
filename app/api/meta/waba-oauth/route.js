@@ -105,6 +105,11 @@ export async function POST(req) {
                 whatsapp_business_account_id: wabaId,
             }, { onConflict: 'empresa_id' }); // A constraint do Banco que diz se o registro deve ser atualizado ou inserido
 
+        if (configError) {
+            console.error("ERRO CRÍTICO NO BANCO (Configurações WhatsApp):", configError);
+            return NextResponse.json({ error: 'Falha ao criar roteamento. Verifique configurações da empresa.' }, { status: 500 });
+        }
+
         return NextResponse.json({ 
             success: true, 
             message: 'Integração OAuth Meta concluída e selada na Nuvem.',
