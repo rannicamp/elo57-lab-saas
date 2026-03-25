@@ -46,8 +46,8 @@ export default function WhatsappButton({ initialData, organizacaoId }) {
 
                 toast.loading("Configurando seu WhatsApp...", { id: 'wa-connect' });
 
-                // Manda o token temporário para o nosso "Negociador" no backend
-                fetch('/api/whatsapp/conectar', {
+                // Manda o token temporário para o nosso "Negociador" Multi-Tenant no backend
+                fetch('/api/meta/waba-oauth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ accessToken, organizacaoId })
