@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useSession } from 'next-auth/react';
+import { useAuth } from '@/contexts/AuthContext';
 import { FaWhatsapp, FaServer, FaCheckCircle, FaSpinner } from 'react-icons/fa';
 import { toast } from 'sonner';
 
 export default function WabaSaasConfigPage() {
-    const { data: session } = useSession();
+    const { user } = useAuth();
     const [isSdkLoaded, setIsSdkLoaded] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
 
@@ -60,7 +60,7 @@ export default function WabaSaasConfigPage() {
                             body: JSON.stringify({ 
                                 accessToken,
                                 // Envia qual organização está conectando isso
-                                organizacaoId: session?.user?.organizacao_id 
+                                organizacaoId: user?.organizacao_id 
                             })
                         });
 

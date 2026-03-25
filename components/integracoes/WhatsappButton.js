@@ -24,7 +24,7 @@ export default function WhatsappButton({ initialData, organizacaoId }) {
                 appId: fbAppId,
                 cookie: true,
                 xfbml: true,
-                version: 'v21.0' // ou v22.0, dependendo da versão mais recente que a Meta liberou
+                version: 'v22.0' // Atualizado para v22.0
             });
             console.log("[WhatsApp] Facebook SDK Inicializado com sucesso!");
         };
@@ -74,7 +74,7 @@ export default function WhatsappButton({ initialData, organizacaoId }) {
             }
         }, {
             // As permissões rigorosas necessárias para o WhatsApp Business
-            scope: 'whatsapp_business_management,whatsapp_business_messaging',
+            scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
             extras: { feature: 'whatsapp_embedded_signup' }
         });
     };

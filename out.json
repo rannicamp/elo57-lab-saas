@@ -1,0 +1,14 @@
+{
+  "err1": {
+    "code": "23502",
+    "details": "Failing row contains (13, null, null, null, null, null, 2026-03-25 18:49:05.655705+00, 1).",
+    "hint": null,
+    "message": "null value in column \"empresa_id\" of relation \"configuracoes_whatsapp\" violates not-null constraint"
+  },
+  "err2": {
+    "code": "23502",
+    "details": "Failing row contains (15, 1, null, null, null, null, inativo, null, null, null, null, 2026-03-25 18:49:05.864054+00, 2026-03-25 18:49:05.864054+00, null, null, t, null).",
+    "hint": null,
+    "message": "null value in column \"access_token\" of relation \"integracoes_meta\" violates not-null constraint"
+  }
+}
