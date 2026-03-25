@@ -55,17 +55,17 @@ function MainLayoutContent({ children }) {
         localStorage.setItem('s57_sidebar_state', isSidebarOpen);
     }, [isSidebarOpen]);
 
-    // Rastreamento de Presença
+    // Rastreamento de Presença (Desativado temporariamente por RLS / Conflito com Dexie Promiser)
     useEffect(() => {
         if (!user?.id) return;
-        const updateOnlineStatus = async () => {
-            try {
-                await supabase.from('usuarios').update({ ultimo_acesso: new Date().toISOString() }).eq('id', user.id);
-            } catch (error) { /* Silencioso */ }
-        };
-        updateOnlineStatus();
-        const interval = setInterval(updateOnlineStatus, 3 * 60 * 1000); // 3 min
-        return () => clearInterval(interval);
+        // const updateOnlineStatus = async () => {
+        //     try {
+        //         await supabase.from('usuarios').update({ ultimo_acesso: new Date().toISOString() }).eq('id', user.id);
+        //     } catch (error) { /* Silencioso */ }
+        // };
+        // updateOnlineStatus();
+        // const interval = setInterval(updateOnlineStatus, 3 * 60 * 1000); // 3 min
+        // return () => clearInterval(interval);
     }, [user?.id, supabase]);
 
     // Verificação de Sessão
