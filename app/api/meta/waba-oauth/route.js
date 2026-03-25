@@ -32,18 +32,41 @@ export async function POST(req) {
         const longLivedToken = exchangeData.access_token;
         console.log("✅ Long-Lived Token Gerado com Sucesso!");
 
-        // 2. Extraímos no Debug da Meta qual o ID de Usuário e WABA atrelados a essa permissão.
+        // 2. Extraímos no Debug da Meta o ID do WABA atrelado a essa permissão (no array de granular_scopes).
         const debugTokenUrl = `https://graph.facebook.com/v22.0/debug_token?input_token=${longLivedToken}&access_token=${appId}|${appSecret}`;
         const debugRes = await fetch(debugTokenUrl);
         const debugData = await debugRes.json();
         
-        let wabaId = "desconhecido";
-        let phoneNumberId = "desconhecido";
+        // Procura os IDs dos WABAs que o usuário acabou de nos dar permissão
+        const granularScopes = debugData?.data?.granular_scopes || [];
+        const wabaScope = granularScopes.find(s => s.scope === 'whatsapp_business_management');
+        const wabaIds = wabaScope?.target_ids || [];
         
-        // Em um setup Embedded Signup avançado deveríamos consultar os WABAs aqui. 
-        // Para garantir o fluxo contínuo, faremos a ingestão bruta nas tabelas Master.
+        if (wabaIds.length === 0) {
+            console.error("DEBUG Data:", JSON.stringify(debugData.data));
+            return NextResponse.json({ error: 'Nenhum WhatsApp Business Account vinculado. Você selecionou um número na tela da Meta?' }, { status: 400 });
+        }
 
-        // 3. PERSISTÊNCIA: Salvamento do Consentimento
+        // Pega o primeiro WABA que o cliente autorizou
+        const wabaId = wabaIds[0];
+        console.log(`✅ WABA Capturado: ${wabaId}`);
+
+        // 3. Pegar os Phone Numbers dentro dessa WABA usando o Token Long-Lived
+        const phonesUrl = `https://graph.facebook.com/v22.0/${wabaId}/phone_numbers?access_token=${longLivedToken}`;
+        const phonesRes = await fetch(phonesUrl);
+        const phonesData = await phonesRes.json();
+
+        const phoneRecord = phonesData?.data?.[0]; // Pega o primeiro número disponível
+        const phoneNumberId = phoneRecord?.id;
+
+        if (!phoneNumberId) {
+            console.error("Phones Data:", JSON.stringify(phonesData));
+            return NextResponse.json({ error: 'Não foi possível encontrar um Número de Telefone válido nesta WABA.' }, { status: 400 });
+        }
+
+        console.log(`✅ Phone Number ID Capturado: ${phoneNumberId} (${phoneRecord?.display_phone_number})`);
+
+        // 4. PERSISTÊNCIA: Salvamento do Consentimento
         const { error: metaError } = await supabase
             .from('integracoes_meta')
             .upsert({
@@ -58,23 +81,25 @@ export async function POST(req) {
             throw new Error("Falha ao injetar Token na Tabela de Integrações.");
         }
 
-        // 4. PERSISTÊNCIA: Criação/Atualização do Motor de Envios (Configurações WhatsApp)
-        // Isso vai garantir que quando tentarmos disparar um Push no futuro, ele leia esse LongLivedToken
+        // 5. PERSISTÊNCIA: Motor de Envios e Webhook
         const { error: configError } = await supabase
             .from('configuracoes_whatsapp')
             .upsert({
                 organizacao_id: organizacaoId,
                 whatsapp_permanent_token: longLivedToken,
-                // Somente atualiza os telefones se encontrarmos na Graph (nesta primeira versão, dependeremos do user preencher)
-                // whatsapp_phone_number_id: phoneNumberId,
-                // whatsapp_business_account_id: wabaId,
+                whatsapp_phone_number_id: phoneNumberId, // AGORA SIM! Webhook vai encontrar!
+                whatsapp_business_account_id: wabaId,
             }, { onConflict: 'organizacao_id' });
 
         if (configError) {
             console.log("Atenção, o Config Error falhou, mas a integração Meta ocorreu", configError);
         }
 
-        return NextResponse.json({ success: true, message: 'Integração OAuth Meta concluída e selada na Nuvem.' });
+        return NextResponse.json({ 
+            success: true, 
+            message: 'Integração OAuth Meta concluída e selada na Nuvem.',
+            phone_number: phoneRecord?.display_phone_number
+        });
         
     } catch (e) {
         console.error("Erro Interno /api/meta/waba-oauth:", e);
