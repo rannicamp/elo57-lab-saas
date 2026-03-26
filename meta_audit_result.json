@@ -1,0 +1,38 @@
+{
+  "config_waba_id": "2729236357287318",
+  "config_phone_id": "740591775798998",
+  "waba_info": {
+    "id": "2729236357287318",
+    "name": "Test WhatsApp Business Account",
+    "timezone_id": "1",
+    "message_template_namespace": "8d79002f_7ccb_4f13_a09f_9583b4938a31"
+  },
+  "phone_numbers": {
+    "data": [
+      {
+        "verified_name": "Test Number",
+        "code_verification_status": "NOT_VERIFIED",
+        "display_phone_number": "+1 555-667-3667",
+        "quality_rating": "GREEN",
+        "platform_type": "CLOUD_API",
+        "throughput": {
+          "level": "STANDARD"
+        },
+        "webhook_configuration": {
+          "application": "https://elo57-lab-saas.netlify.app/api/whatsapp/webhook"
+        },
+        "id": "740591775798998"
+      }
+    ],
+    "paging": {
+      "cursors": {
+        "before": "QVFIU05SVDZAkMVZAhWDRydll1MHlIYjd3TXdXclF6M05fd0dyNDIwVmJvS2paLXlqNHRMblJISE9OV3hnTDR1NTlLR3YZD",
+        "after": "QVFIU05SVDZAkMVZAhWDRydll1MHlIYjd3TXdXclF6M05fd0dyNDIwVmJvS2paLXlqNHRMblJISE9OV3hnTDR1NTlLR3YZD"
+      }
+    }
+  },
+  "token_owner": {
+    "id": "26691638477096714",
+    "name": "Ranniere Campos"
+  }
+}

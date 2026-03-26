@@ -2,24 +2,43 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { FaWhatsapp, FaServer, FaCheckCircle, FaSpinner } from 'react-icons/fa';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createClient } from '@/utils/supabase/client';
+import { FaWhatsapp, FaCheckCircle, FaSpinner, FaTimesCircle, FaPhone } from 'react-icons/fa';
 import { toast } from 'sonner';
 
 export default function WabaSaasConfigPage() {
     const { user } = useAuth();
+    const queryClient = useQueryClient();
+    const supabase = createClient();
+    const organizacaoId = user?.organizacao_id;
     const [isSdkLoaded, setIsSdkLoaded] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
 
-    // Carrega o SDK do Facebook assim que a página renderizar
+    // Busca a configuração atual de WhatsApp da organização
+    const { data: config, isLoading: isConfigLoading } = useQuery({
+        queryKey: ['whatsapp-config', organizacaoId],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('configuracoes_whatsapp')
+                .select('*')
+                .eq('organizacao_id', organizacaoId)
+                .maybeSingle();
+            if (error) throw error;
+            return data;
+        },
+        enabled: !!organizacaoId,
+    });
+
+    const isConnected = !!(config?.whatsapp_phone_number_id && config?.whatsapp_permanent_token);
+
+    // Carrega o SDK do Facebook
     useEffect(() => {
-        if (window.FB) {
-            setIsSdkLoaded(true);
-            return;
-        }
+        if (window.FB) { setIsSdkLoaded(true); return; }
 
         window.fbAsyncInit = function () {
             window.FB.init({
-                appId: process.env.NEXT_PUBLIC_FACEBOOK_APP_ID_WA, // Usando o App Oficial
+                appId: process.env.NEXT_PUBLIC_FACEBOOK_APP_ID_WA,
                 cookie: true,
                 xfbml: true,
                 version: 'v22.0',
@@ -38,10 +57,7 @@ export default function WabaSaasConfigPage() {
     }, []);
 
     const handleConnectWhatsApp = () => {
-        if (!isSdkLoaded) {
-            toast.error("O SDK do Facebook ainda está carregando...");
-            return;
-        }
+        if (!isSdkLoaded) { toast.error("O SDK do Facebook ainda está carregando..."); return; }
 
         setIsConnecting(true);
 
@@ -50,34 +66,29 @@ export default function WabaSaasConfigPage() {
                 if (response.authResponse) {
                     const accessToken = response.authResponse.accessToken;
                     console.log("🔵 Token OAUTH Temporário obtido com sucesso!");
-                    
+
                     try {
-                        toast.loading("Negociando acesso profundo com a Meta...");
-                        
+                        toast.loading("Negociando acesso com a Meta...");
+
                         const res = await fetch('/api/meta/waba-oauth', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                accessToken,
-                                // Envia qual organização está conectando isso
-                                organizacaoId: user?.organizacao_id 
-                            })
+                            body: JSON.stringify({ accessToken, organizacaoId })
                         });
 
                         const data = await res.json();
                         toast.dismiss();
 
                         if (res.ok) {
-                            toast.success("✅ WhatsApp Comercial conectado com sucesso!");
-                            setIsConnecting(false);
+                            toast.success(`✅ WhatsApp conectado: ${data.phone_number}`);
+                            queryClient.invalidateQueries({ queryKey: ['whatsapp-config', organizacaoId] });
                         } else {
                             toast.error(data.error || "Falha ao conectar WABA.");
-                            setIsConnecting(false);
                         }
-
                     } catch (error) {
                         toast.dismiss();
                         toast.error("Erro na comunicação com o servidor.");
+                    } finally {
                         setIsConnecting(false);
                     }
                 } else {
@@ -86,63 +97,95 @@ export default function WabaSaasConfigPage() {
                 }
             },
             {
-                // Escopos exigidos pela Meta para o Embedded Signup funcionar 
-                scope: 'whatsapp_business_management,whatsapp_business_messaging',
-                extras: {
-                    feature: 'whatsapp_embedded_signup'
-                }
+                // business_management é obrigatório para o Embedded Signup completo
+                scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
+                extras: { feature: 'whatsapp_embedded_signup' }
             }
         );
     };
 
     return (
-        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-8 animate-fade-in pb-32">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-                    <span className="bg-gradient-to-tr from-green-500 to-green-600 text-white p-2.5 rounded-xl shadow-lg shadow-green-500/20">
-                        <FaWhatsapp size={22} className="drop-shadow-sm" />
+        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-8 pb-32">
+
+            {/* Cabeçalho */}
+            <div>
+                <h2 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
+                    <span className="bg-green-100 text-green-600 p-2 rounded-xl">
+                        <FaWhatsapp size={22} />
                     </span>
-                    Instalador WhatsApp Multi-Tenant
-                </h1>
-                <p className="mt-3 text-gray-500 text-lg leading-relaxed max-w-2xl">
-                    Ambiente isolado para testes do <strong className="text-gray-700">Embedded Signup</strong>. 
-                    Esta página conectará seu App Oficial e armazenará o Handshake definitivo de forma segmentada.
+                    WhatsApp Business
+                </h2>
+                <p className="text-gray-500 font-medium mt-1">
+                    Conecte e gerencie o número de WhatsApp da sua organização.
                 </p>
             </div>
 
-            {/* Painel de Status */}
-            <div className="bg-white rounded-3xl p-8 border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-green-50/50 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
-                
-                <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between relative z-10">
+            {/* Card de Status Atual */}
+            <div className="p-6 border border-gray-200 rounded-lg bg-white shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-green-500" />
+                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Status da Conexão</h4>
+
+                {isConfigLoading ? (
+                    <div className="flex items-center gap-2 text-gray-500">
+                        <FaSpinner className="animate-spin" /> Verificando conexão...
+                    </div>
+                ) : isConnected ? (
+                    <div className="flex flex-col md:flex-row md:items-center gap-4">
+                        <div className="flex items-center gap-3">
+                            <FaCheckCircle className="text-green-500 text-2xl flex-shrink-0" />
+                            <div>
+                                <p className="font-bold text-gray-800">Número Conectado</p>
+                                <p className="text-sm text-gray-500 font-medium flex items-center gap-1.5 mt-0.5">
+                                    <FaPhone size={10} />
+                                    Phone Number ID: <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{config.whatsapp_phone_number_id}</span>
+                                </p>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                    WABA ID: <span className="font-mono">{config.whatsapp_business_account_id}</span>
+                                </p>
+                            </div>
+                        </div>
+                        <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-green-50 text-green-700 border border-green-200 uppercase md:ml-auto">
+                            Ativo
+                        </span>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-3 text-amber-600">
+                        <FaTimesCircle className="text-amber-500 text-2xl flex-shrink-0" />
+                        <div>
+                            <p className="font-bold text-gray-800">Nenhum número conectado</p>
+                            <p className="text-sm text-gray-500 font-medium">Clique em "Conectar" abaixo para começar.</p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Card de Ação */}
+            <div className="p-6 border border-gray-200 rounded-lg bg-white shadow-sm">
+                <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between">
                     <div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">Conectar Empresa</h3>
+                        <h3 className="text-base font-bold text-gray-800 mb-1">
+                            {isConnected ? 'Reconectar / Trocar Número' : 'Conectar sua Empresa'}
+                        </h3>
                         <p className="text-gray-500 text-sm max-w-md">
-                            Ao clicar em conectar, uma janela da Meta se abrirá para que você selecione 
-                            (ou crie) a WABA e o Número de Telefone desta Organização.
+                            Ao clicar em conectar, uma janela da Meta se abrirá para que você selecione a sua
+                            conta do WhatsApp Business e o número de telefone desta organização.
                         </p>
-                        
-                        <div className="mt-4 flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-gray-50 text-gray-600 rounded-full inline-flex border border-gray-200">
-                            <span className={`w-2 h-2 rounded-full ${isSdkLoaded ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                            {isSdkLoaded ? "Facebook SDK Online (v22.0)" : "Carregando Meta Graph SDK..."}
+
+                        <div className="mt-3 flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-gray-50 text-gray-600 rounded-full inline-flex border border-gray-200">
+                            <span className={`w-2 h-2 rounded-full ${isSdkLoaded ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                            {isSdkLoaded ? "Meta SDK Pronto (v22.0)" : "Carregando SDK da Meta..."}
                         </div>
                     </div>
 
                     <button
                         onClick={handleConnectWhatsApp}
                         disabled={!isSdkLoaded || isConnecting}
-                        className="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-xl font-semibold shadow-lg shadow-green-600/30 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group active:scale-95 whitespace-nowrap"
+                        className="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-xl font-semibold shadow-lg shadow-green-600/20 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 whitespace-nowrap"
                     >
                         {isConnecting ? (
-                            <>
-                                <FaSpinner className="animate-spin" size={20} />
-                                Autenticando...
-                            </>
+                            <><FaSpinner className="animate-spin" size={18} /> Autenticando...</>
                         ) : (
-                            <>
-                                <FaWhatsapp size={20} className="group-hover:scale-110 transition-transform" />
-                                Integrar WhatsApp Business
-                            </>
+                            <><FaWhatsapp size={20} /> {isConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp'}</>
                         )}
                     </button>
                 </div>

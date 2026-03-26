@@ -103,7 +103,7 @@ export async function POST(req) {
                 whatsapp_permanent_token: longLivedToken,
                 whatsapp_phone_number_id: phoneNumberId, // AGORA SIM! Webhook vai encontrar!
                 whatsapp_business_account_id: wabaId,
-            }, { onConflict: 'empresa_id' }); // A constraint do Banco que diz se o registro deve ser atualizado ou inserido
+            }, { onConflict: 'organizacao_id' }); // Multi-tenancy: atualiza o registro da org se já existir
 
         if (configError) {
             console.error("ERRO CRÍTICO NO BANCO (Configurações WhatsApp):", configError);
