@@ -178,7 +178,7 @@ const fetchContactProfileData = async (supabase, contatoId, organizacaoId) => {
             emails(*)
         `) 
         .eq('id', contatoId)
-        .single();
+        .maybeSingle();
 
     // Resolve os nomes com fallback: coluna _name → JOIN meta_ativos
     if (contactDetails) {
