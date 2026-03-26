@@ -159,7 +159,7 @@ export async function POST(request) {
                 updated_at: new Date().toISOString(),
                 last_direction: 'outbound',
                 last_status: 'sent'
-            }, { onConflict: 'phone_number' })
+            }, { onConflict: 'phone_number,organizacao_id' }) // 🔥 Multi-tenant: cada org tem sua própria conversa por número
             .select()
             .single();
 

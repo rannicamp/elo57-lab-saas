@@ -158,7 +158,7 @@ export async function findOrCreateContactAndConversation(supabaseAdmin, message,
 
     // 3. Garante que a Conversa existe (Upsert)
     const { data: conversationData } = await supabaseAdmin.from('whatsapp_conversations')
-        .upsert(upsertData, { onConflict: 'phone_number' })
+        .upsert(upsertData, { onConflict: 'phone_number,organizacao_id' }) // 🔥 Multi-tenant correto
         .select()
         .single();
 
