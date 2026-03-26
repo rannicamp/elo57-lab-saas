@@ -194,7 +194,7 @@ export default function LocationPickerModal({ isOpen, onClose, onSend }) {
                 {/* Footer Fixo */}
                 <div className="p-4 bg-white border-t shrink-0 flex flex-col gap-2 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
                     <button 
-                        onClick={() => { onSend(position); onClose(); }}
+                        onClick={() => { onSend({ latitude: position[0], longitude: position[1] }); onClose(); }}
                         disabled={!position}
                         className="w-full bg-[#008069] hover:bg-[#006d59] text-white py-3.5 rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 transition-all active:scale-95 text-sm"
                     >

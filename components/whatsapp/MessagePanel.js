@@ -218,7 +218,8 @@ export default function MessagePanel({ contact, onBack }) {
                 longitude,
                 "Localização Fixada",
                 "",
-                contact.contato_id
+                contact.contato_id,
+                organizacaoId
             );
 
             if (!result.success) throw new Error(result.error);

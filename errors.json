@@ -1,0 +1,109 @@
+[
+  {
+    "id": 9837,
+    "sent_at": "2026-02-13T23:25:30.06+00:00",
+    "status": "failed",
+    "content": "📍 Localização: undefined, undefined",
+    "error_message": "(#100) The parameter location['longitude'] is required.",
+    "raw_payload": {
+      "error": {
+        "code": 100,
+        "type": "OAuthException",
+        "message": "(#100) The parameter location['longitude'] is required.",
+        "fbtrace_id": "A1d374LrKMny_otHx0Af1Mo"
+      }
+    }
+  },
+  {
+    "id": 9750,
+    "sent_at": "2026-02-12T13:59:32.404+00:00",
+    "status": "failed",
+    "content": "Olá Ranniere Campos Mendes, tudo bem com você?\nPodemos continuar a nossa conversa?",
+    "error_message": "Message undeliverable: Message undeliverable (Message Undeliverable.)",
+    "raw_payload": {
+      "id": "wamid.HBgLNTUzMzkxOTEyMjkVAgARGBI0MzRERUMxRUYwQjdCNjE4MTYA",
+      "errors": [
+        {
+          "code": 131026,
+          "title": "Message undeliverable",
+          "message": "Message undeliverable",
+          "error_data": {
+            "details": "Message Undeliverable."
+          }
+        }
+      ],
+      "status": "failed",
+      "timestamp": "1770904772",
+      "recipient_id": "55339191229"
+    }
+  },
+  {
+    "id": 9680,
+    "sent_at": "2026-02-11T13:03:32.409+00:00",
+    "status": "failed",
+    "content": "O Studio 57 tem um novo empreendimento para te apresentar!\n\nQuer saber mais?",
+    "error_message": "This message was not delivered to maintain healthy ecosystem engagement.: This message was not delivered to maintain healthy ecosystem engagement. (In order to maintain a healthy ecosystem engagement, the message failed to be delivered.)",
+    "raw_payload": {
+      "id": "wamid.HBgMNTUzMzk5Mzk0NDIxFQIAERgSRDIxRDQyOEEzRDFGRTc0MTYwAA==",
+      "errors": [
+        {
+          "code": 131049,
+          "title": "This message was not delivered to maintain healthy ecosystem engagement.",
+          "message": "This message was not delivered to maintain healthy ecosystem engagement.",
+          "error_data": {
+            "details": "In order to maintain a healthy ecosystem engagement, the message failed to be delivered."
+          }
+        }
+      ],
+      "status": "failed",
+      "timestamp": "1770815012",
+      "recipient_id": "553399394421"
+    }
+  },
+  {
+    "id": 9636,
+    "sent_at": "2026-02-11T11:00:58.596+00:00",
+    "status": "failed",
+    "content": "O Studio 57 tem um novo empreendimento para te apresentar!\n\nQuer saber mais?",
+    "error_message": "Message undeliverable: Message undeliverable (Message Undeliverable.)",
+    "raw_payload": {
+      "id": "wamid.HBgMNTUzMTM4NjEyMjk5FQIAERgSRENBRjQ3QzMzQzkwMEUwREEwAA==",
+      "errors": [
+        {
+          "code": 131026,
+          "title": "Message undeliverable",
+          "message": "Message undeliverable",
+          "error_data": {
+            "details": "Message Undeliverable."
+          }
+        }
+      ],
+      "status": "failed",
+      "timestamp": "1770807659",
+      "recipient_id": "553138612299"
+    }
+  },
+  {
+    "id": 9595,
+    "sent_at": "2026-02-10T11:24:48.786+00:00",
+    "status": "failed",
+    "content": "O Studio 57 tem um novo empreendimento para te apresentar!\n\nQuer saber mais?",
+    "error_message": "Message undeliverable: Message undeliverable (Message Undeliverable.)",
+    "raw_payload": {
+      "id": "wamid.HBgNNTU1NTMzOTg4MzcwMBUCABEYEkM0ODIzQjA2QTVERjEyNEU4QwA=",
+      "errors": [
+        {
+          "code": 131026,
+          "title": "Message undeliverable",
+          "message": "Message undeliverable",
+          "error_data": {
+            "details": "Message Undeliverable."
+          }
+        }
+      ],
+      "status": "failed",
+      "timestamp": "1770722689",
+      "recipient_id": "5555339883700"
+    }
+  }
+]
